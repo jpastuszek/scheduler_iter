@@ -38,7 +38,7 @@ impl<Token> Task<Token> where Token: Clone {
         }
     }
 
-    // calculate next from time
+    // TODO: should that return new task (immutable?)
     fn next_schedule(&mut self) -> SteadyTime {
         self.run_offset = self.run_offset + self.interval;
         self.run_offset // ?
@@ -88,6 +88,7 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
         let current_time_point = self.to_time_point(now - self.offset);
 
         //TODO: optimise
+        //TODO: this should not loop - just schedule for next and let scheduler to report Missed
         let mut time_point;
         loop {
             time_point = self.to_time_point(task.next_schedule() - now);
@@ -189,8 +190,13 @@ mod task {
 
     #[test]
     fn getting_next_schedule() {
-        let task = Task::new(Duration::seconds(1), SteadyTime::now(), TaskBond::OneOff, 42);
+        let now = SteadyTime::now();
+        let interval = Duration::seconds(1);
+        let mut task = Task::new(interval, now, TaskBond::OneOff, 42);
         println!("task: {:?}", task);
+        assert_eq!(task.next_schedule(), now + interval);
+        assert_eq!(task.next_schedule(), now + interval * 2);
+        assert_eq!(task.next_schedule(), now + interval * 3);
     }
 }
 
