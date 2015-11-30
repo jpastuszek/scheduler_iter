@@ -38,10 +38,15 @@ impl<Token> Task<Token> where Token: Clone {
         }
     }
 
-    // TODO: should that return new task (immutable?)
-    fn next_schedule(&mut self) -> SteadyTime {
-        self.run_offset = self.run_offset + self.interval;
-        self.run_offset // ?
+    fn next(self) -> Task<Token> {
+        Task {
+            run_offset: self.run_offset + self.interval,
+            .. self
+        }
+    }
+
+    fn schedule(&self) -> SteadyTime {
+        self.run_offset + self.interval
     }
 }
 
@@ -82,20 +87,12 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
         }
     }
 
-    fn schedule(&mut self, mut task: Task<Token>) {
+    fn schedule(&mut self, task: Task<Token>) {
         let now = self.time_source.now();
         assert!(now > self.offset);
-        let current_time_point = self.to_time_point(now - self.offset);
 
-        //TODO: optimise
-        //TODO: this should not loop - just schedule for next and let scheduler to report Missed
-        let mut time_point;
-        loop {
-            time_point = self.to_time_point(task.next_schedule() - now);
-            if time_point > current_time_point {
-                break;
-            }
-        }
+        let task = task.next();
+        let time_point = self.to_time_point(task.schedule() - now);
 
         self.tasks.entry(time_point).or_insert(Vec::new()).push(task);
     }
@@ -192,11 +189,10 @@ mod task {
     fn getting_next_schedule() {
         let now = SteadyTime::now();
         let interval = Duration::seconds(1);
-        let mut task = Task::new(interval, now, TaskBond::OneOff, 42);
+        let task = Task::new(interval, now, TaskBond::OneOff, 42);
         println!("task: {:?}", task);
-        assert_eq!(task.next_schedule(), now + interval);
-        assert_eq!(task.next_schedule(), now + interval * 2);
-        assert_eq!(task.next_schedule(), now + interval * 3);
+        assert_eq!(task.schedule(), now + interval);
+        assert_eq!(task.next().next().schedule(), now + interval * 3);
     }
 }
 
