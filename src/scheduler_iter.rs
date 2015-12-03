@@ -55,8 +55,6 @@ impl<Token> Task<Token> where Token: Clone {
 pub trait TimeSource {
     // Duration since this TimeSource was crated
     fn now(&self) -> Duration;
-    // Blocks for given duration
-    fn wait(&mut self, duration: Duration);
 }
 
 struct SteadyTimeSource {
@@ -75,10 +73,6 @@ impl TimeSource for SteadyTimeSource {
     fn now(&self) -> Duration {
         SteadyTime::now() - self.offset
     }
-
-    fn wait(&mut self, duration: Duration) {
-        sleep_ms(duration.num_milliseconds() as u32)
-    }
 }
 
 // TODO: should that be u64?
@@ -92,6 +86,7 @@ pub enum SchedulerAction {
 }
 
 pub enum Schedule<Token> {
+    NextIn(Duration),
     Missed(Vec<Token>),
     Current(Vec<Token>)
 }
@@ -118,7 +113,7 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
     fn schedule(&mut self, task: Task<Token>) {
         let now = self.time_source.now();
 
-        let task = task.next();
+        let task = task;
         let time_point = self.to_time_point(task.schedule() - now);
 
         self.tasks.entry(time_point).or_insert(Vec::new()).push(task);
@@ -152,13 +147,11 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
         }
     }
 
-    //TODO: rename to next; don't wait but return NextIn(duration) or something
-    pub fn wait(&mut self) -> Option<Schedule<Token>> {
+    pub fn next(&mut self) -> Option<Schedule<Token>> {
         match self.next_action() {
             SchedulerAction::None => None,
             SchedulerAction::Wait(duration) => {
-                self.time_source.wait(duration);
-                self.wait()
+                Some(Schedule::NextIn(duration))
             },
             SchedulerAction::Skip(time_points) => {
                 let tasks: Vec<Task<Token>> = time_points.iter().flat_map(|time_point|
@@ -199,10 +192,7 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
         assert!(duration >= 0);
 
         let time_point = duration / interval;
-        if duration % interval != 0 {
-            time_point + 1; // ceil
-        }
-        time_point as TimePoint
+        (if duration % interval == 0 { time_point } else { time_point + 1 /* celi */ }) as TimePoint
     }
 
     fn to_duration(&self, time_point: TimePoint) -> Duration {
@@ -213,7 +203,7 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
 #[cfg(test)]
 mod task {
     use time::Duration;
-    use super::{Task, TaskBond, TimeSource, Scheduler};
+    use super::{Task, TaskBond, TimeSource, Scheduler, Schedule};
 
     struct MockTimeSource {
         current_time: Duration
@@ -225,15 +215,15 @@ mod task {
                 current_time: Duration::seconds(0)
             }
         }
+
+        fn fast_forward(&mut self, duration: Duration) {
+            self.current_time = self.current_time + duration;
+        }
     }
 
     impl TimeSource for MockTimeSource {
         fn now(&self) -> Duration {
             self.current_time
-        }
-
-        fn wait(&mut self, duration: Duration) {
-            self.current_time = self.current_time + duration;
         }
     }
 
@@ -248,9 +238,28 @@ mod task {
     }
 
     #[test]
+    fn scheduler_to_time_point() {
+        let scheduler: Scheduler<(),_> = Scheduler::new(Duration::seconds(1), MockTimeSource::new());
+        assert_eq!(scheduler.to_time_point(Duration::seconds(0)), 0);
+        assert_eq!(scheduler.to_time_point(Duration::seconds(1)), 1);
+        assert_eq!(scheduler.to_time_point(Duration::seconds(2)), 2);
+        assert_eq!(scheduler.to_time_point(Duration::milliseconds(2000)), 2);
+        assert_eq!(scheduler.to_time_point(Duration::milliseconds(100)), 1);
+        assert_eq!(scheduler.to_time_point(Duration::milliseconds(1100)), 2);
+        assert_eq!(scheduler.to_time_point(Duration::milliseconds(1500)), 2);
+        assert_eq!(scheduler.to_time_point(Duration::milliseconds(1800)), 2);
+        assert_eq!(scheduler.to_time_point(Duration::milliseconds(2800)), 3);
+    }
+
+    #[test]
     fn scheduler() {
         let mut scheduler = Scheduler::new(Duration::seconds(1), MockTimeSource::new());
         scheduler.after(Duration::seconds(1), 1i32);
+        if let Some(Schedule::NextIn(duration)) = scheduler.next() {
+            assert_eq!(duration, Duration::seconds(1));
+        } else {
+            panic!("Expected to get NextIn");
+        }
     }
 }
 
