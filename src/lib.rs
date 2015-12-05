@@ -1,4 +1,4 @@
 extern crate time;
 
-mod scheduler_iter;
+pub mod scheduler_iter;
 

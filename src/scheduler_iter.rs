@@ -80,7 +80,7 @@ impl TimeSource for SteadyTimeSource {
 }
 
 // TODO: should that be u64?
-type TimePoint = u32;
+pub type TimePoint = u32;
 
 pub enum SchedulerAction {
     None,
