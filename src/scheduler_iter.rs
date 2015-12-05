@@ -61,6 +61,7 @@ pub trait FastForward {
     fn fast_forward(&mut self, duration: Duration);
 }
 
+#[allow(dead_code)]
 struct SteadyTimeSource {
     offset: SteadyTime
 }
@@ -147,11 +148,7 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
     //TODO: with_time_source()
 
     fn schedule(&mut self, task: Task<Token>) {
-        let now = self.time_source.now();
-
-        let task = task;
-        let time_point = self.to_time_point(task.schedule() - now);
-
+        let time_point = self.to_time_point(task.schedule());
         self.tasks.entry(time_point).or_insert(Vec::new()).push(task);
     }
 
@@ -190,31 +187,29 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
                 Some(Schedule::NextIn(duration))
             },
             SchedulerAction::Skip(time_points) => {
-                let tasks: Vec<Task<Token>> = time_points.iter().flat_map(|time_point|
-                        self.tasks.remove(&time_point).unwrap()
-                    ).collect();
-                for task in tasks.iter() {
-                    match task.bond {
-                        TaskBond::Perpetual => self.schedule(task.clone()),
-                        TaskBond::OneOff => ()
-                    };
-                }
-                Some(Schedule::Missed(tasks.into_iter().map(|task| task.token).collect()))
+                Some(Schedule::Missed(self.consume(time_points)))
             },
             SchedulerAction::Yield(time_point) => {
-                let mut tasks = self.tasks.remove(&time_point).unwrap();
-                for task in tasks.iter() {
-                    match task.bond {
-                        TaskBond::Perpetual => self.schedule(task.clone()),
-                        TaskBond::OneOff => ()
-                    };
-                }
-
-                tasks.sort_by(|a, b| a.run_offset.cmp(&b.run_offset));
-
-                Some(Schedule::Current(tasks.into_iter().map(|task| task.token).collect()))
+                Some(Schedule::Current(self.consume(vec![time_point])))
             }
         }
+    }
+
+    fn consume(&mut self, time_points: Vec<TimePoint>) -> Vec<Token> {
+        let mut tasks: Vec<Task<Token>> = time_points.iter().flat_map(|time_point|
+                self.tasks.remove(&time_point).unwrap()
+            ).collect();
+
+        tasks.sort_by(|a, b| a.run_offset.cmp(&b.run_offset));
+        let tokens = tasks.iter().map(|ref task| task.token.clone()).collect();
+
+        for task in tasks {
+            match task.bond {
+                TaskBond::Perpetual => self.schedule(task.next()),
+                TaskBond::OneOff => ()
+            };
+        }
+        tokens
     }
 
     fn to_time_point(&self, duration: Duration) -> TimePoint {
@@ -222,8 +217,7 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
         let duration = duration.num_microseconds().unwrap();
         assert!(duration >= 0);
 
-        let time_point = duration / interval;
-        (if duration % interval == 0 { time_point } else { time_point + 1 /* celi */ }) as TimePoint
+        (duration / interval) as TimePoint
     }
 
     fn to_duration(&self, time_point: TimePoint) -> Duration {
@@ -283,15 +277,15 @@ mod task {
         assert_eq!(scheduler.to_time_point(Duration::seconds(1)), 1);
         assert_eq!(scheduler.to_time_point(Duration::seconds(2)), 2);
         assert_eq!(scheduler.to_time_point(Duration::milliseconds(2000)), 2);
-        assert_eq!(scheduler.to_time_point(Duration::milliseconds(100)), 1);
-        assert_eq!(scheduler.to_time_point(Duration::milliseconds(1100)), 2);
-        assert_eq!(scheduler.to_time_point(Duration::milliseconds(1500)), 2);
-        assert_eq!(scheduler.to_time_point(Duration::milliseconds(1800)), 2);
-        assert_eq!(scheduler.to_time_point(Duration::milliseconds(2800)), 3);
+        assert_eq!(scheduler.to_time_point(Duration::milliseconds(100)), 0);
+        assert_eq!(scheduler.to_time_point(Duration::milliseconds(1100)), 1);
+        assert_eq!(scheduler.to_time_point(Duration::milliseconds(1500)), 1);
+        assert_eq!(scheduler.to_time_point(Duration::milliseconds(1800)), 1);
+        assert_eq!(scheduler.to_time_point(Duration::milliseconds(2800)), 2);
     }
 
     #[test]
-    fn scheduler() {
+    fn scheduler_after() {
         let mut scheduler = Scheduler::new(Duration::seconds(1), MockTimeSource::new());
 
         scheduler.after(Duration::seconds(1), 1i32);
@@ -299,8 +293,31 @@ mod task {
         assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::seconds(1))));
 
         scheduler.fast_forward(Duration::milliseconds(100));
+        assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::milliseconds(900))));
+        scheduler.fast_forward(Duration::milliseconds(900));
         assert_eq!(scheduler.next(), Option::Some(Schedule::Current(vec![1])));
         assert_eq!(scheduler.next(), Option::None);
+    }
+
+    #[test]
+    fn scheduler_every() {
+        let mut scheduler = Scheduler::new(Duration::seconds(1), MockTimeSource::new());
+
+        scheduler.every(Duration::seconds(1), 1i32);
+        assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::seconds(1))));
+        assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::seconds(1))));
+
+        scheduler.fast_forward(Duration::milliseconds(100));
+        assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::milliseconds(900))));
+        scheduler.fast_forward(Duration::milliseconds(900));
+        assert_eq!(scheduler.next(), Option::Some(Schedule::Current(vec![1])));
+        assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::seconds(1))));
+
+        scheduler.fast_forward(Duration::milliseconds(600));
+        assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::milliseconds(400))));
+        scheduler.fast_forward(Duration::milliseconds(500));
+        assert_eq!(scheduler.next(), Option::Some(Schedule::Current(vec![1])));
+        assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::milliseconds(900))));
     }
 }
 
