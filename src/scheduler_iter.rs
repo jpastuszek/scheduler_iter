@@ -296,6 +296,13 @@ mod task {
     }
 
     #[test]
+    fn scheduler_empty() {
+        let mut scheduler: Scheduler<(), _> = Scheduler::new(Duration::seconds(1));
+        assert_eq!(scheduler.next(), Option::None);
+        assert_eq!(scheduler.next(), Option::None);
+    }
+
+    #[test]
     fn scheduler_after() {
         let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSource::new());
 
