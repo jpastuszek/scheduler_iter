@@ -190,7 +190,14 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
                 Some(Schedule::NextIn(duration))
             },
             SchedulerAction::Skip(time_points) => {
-                Some(Schedule::Missed(self.consume(time_points)))
+                let mut missed = Vec::new();
+
+                missed.extend(self.consume(time_points));
+                // collect all reschedules of consumed tasks if they end up missed already
+                while let SchedulerAction::Skip(time_points) = self.next_action() {
+                    missed.extend(self.consume(time_points));
+                }
+                Some(Schedule::Missed(missed))
             },
             SchedulerAction::Yield(time_point) => {
                 Some(Schedule::Current(self.consume(vec![time_point])))
@@ -322,6 +329,16 @@ mod task {
         scheduler.fast_forward(Duration::milliseconds(500));
         assert_eq!(scheduler.next(), Option::Some(Schedule::Current(vec![1])));
         assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::milliseconds(900))));
+    }
+
+    #[test]
+    fn scheduler_every_missed() {
+        let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSource::new());
+
+        scheduler.every(Duration::seconds(1), 1i32);
+        scheduler.fast_forward(Duration::seconds(4));
+        assert_eq!(scheduler.next(), Option::Some(Schedule::Missed(vec![1, 1, 1])));
+        assert_eq!(scheduler.next(), Option::Some(Schedule::Current(vec![1])));
     }
 }
 
