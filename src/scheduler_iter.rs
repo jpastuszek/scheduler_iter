@@ -61,8 +61,7 @@ pub trait FastForward {
     fn fast_forward(&mut self, duration: Duration);
 }
 
-#[allow(dead_code)]
-struct SteadyTimeSource {
+pub struct SteadyTimeSource {
     offset: SteadyTime
 }
 
@@ -134,9 +133,16 @@ pub struct Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
     time_source: TS
 }
 
-impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
+impl<Token> Scheduler<Token, SteadyTimeSource> where Token: Clone {
     //TODO: way to specify how many durations it is OK to consider task current
-    pub fn new(time_point_interval: Duration, time_source: TS) -> Scheduler<Token, TS> where TS: TimeSource {
+    pub fn new(time_point_interval: Duration) -> Scheduler<Token, SteadyTimeSource> {
+        Scheduler::with_time_source(time_point_interval, SteadyTimeSource::new())
+    }
+
+}
+
+impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
+    pub fn with_time_source(time_point_interval: Duration, time_source: TS) -> Scheduler<Token, TS> {
         assert!(time_point_interval > Duration::seconds(0));
         Scheduler {
             time_point_interval: time_point_interval,
@@ -144,8 +150,6 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
             time_source: time_source
         }
     }
-
-    //TODO: with_time_source()
 
     fn schedule(&mut self, task: Task<Token>) {
         let time_point = self.to_time_point(task.schedule());
@@ -233,8 +237,9 @@ impl<Token, TS> FastForward for Scheduler<Token, TS> where TS: TimeSource + Fast
 
 #[cfg(test)]
 mod task {
+    use super::*;
+    use super::{Task, TaskBond};
     use time::Duration;
-    use super::{Task, TaskBond, TimeSource, Scheduler, Schedule, FastForward};
 
     struct MockTimeSource {
         current_time: Duration
@@ -272,7 +277,7 @@ mod task {
 
     #[test]
     fn scheduler_to_time_point() {
-        let scheduler: Scheduler<(),_> = Scheduler::new(Duration::seconds(1), MockTimeSource::new());
+        let scheduler: Scheduler<(), _> = Scheduler::new(Duration::seconds(1));
         assert_eq!(scheduler.to_time_point(Duration::seconds(0)), 0);
         assert_eq!(scheduler.to_time_point(Duration::seconds(1)), 1);
         assert_eq!(scheduler.to_time_point(Duration::seconds(2)), 2);
@@ -286,7 +291,7 @@ mod task {
 
     #[test]
     fn scheduler_after() {
-        let mut scheduler = Scheduler::new(Duration::seconds(1), MockTimeSource::new());
+        let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSource::new());
 
         scheduler.after(Duration::seconds(1), 1i32);
         assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::seconds(1))));
@@ -301,7 +306,7 @@ mod task {
 
     #[test]
     fn scheduler_every() {
-        let mut scheduler = Scheduler::new(Duration::seconds(1), MockTimeSource::new());
+        let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSource::new());
 
         scheduler.every(Duration::seconds(1), 1i32);
         assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::seconds(1))));
