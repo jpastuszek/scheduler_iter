@@ -79,10 +79,9 @@ impl TimeSource for SteadyTimeSource {
     }
 }
 
-// TODO: should that be u64?
-pub type TimePoint = u32;
+type TimePoint = u64;
 
-pub enum SchedulerAction {
+enum SchedulerAction {
     None,
     Wait(Duration),
     Skip(Vec<TimePoint>),
@@ -225,7 +224,7 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
     }
 
     fn to_duration(&self, time_point: TimePoint) -> Duration {
-        self.time_point_interval * (time_point as i32)
+        Duration::microseconds(self.time_point_interval.num_microseconds().unwrap() * time_point as i64)
     }
 }
 
