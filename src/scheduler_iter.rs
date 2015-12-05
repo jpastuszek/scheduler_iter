@@ -1,5 +1,4 @@
 use time::{SteadyTime, Duration};
-use std::thread::sleep_ms;
 use std::collections::BTreeMap;
 use std::cmp::Ordering;
 use std::fmt;
@@ -56,6 +55,10 @@ impl<Token> Task<Token> where Token: Clone {
 pub trait TimeSource {
     // Duration since this TimeSource was crated
     fn now(&self) -> Duration;
+}
+
+pub trait FastForward {
+    fn fast_forward(&mut self, duration: Duration);
 }
 
 struct SteadyTimeSource {
@@ -214,11 +217,6 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn replace_time_source(&mut self, time_source: TS) where TS: TimeSource  {
-        self.time_source = time_source
-    }
-
     fn to_time_point(&self, duration: Duration) -> TimePoint {
         let interval = self.time_point_interval.num_microseconds().unwrap();
         let duration = duration.num_microseconds().unwrap();
@@ -233,10 +231,16 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
     }
 }
 
+impl<Token, TS> FastForward for Scheduler<Token, TS> where TS: TimeSource + FastForward, Token: Clone {
+    fn fast_forward(&mut self, duration: Duration) {
+        self.time_source.fast_forward(duration);
+    }
+}
+
 #[cfg(test)]
 mod task {
     use time::Duration;
-    use super::{Task, TaskBond, TimeSource, Scheduler, Schedule};
+    use super::{Task, TaskBond, TimeSource, Scheduler, Schedule, FastForward};
 
     struct MockTimeSource {
         current_time: Duration
@@ -248,11 +252,11 @@ mod task {
                 current_time: Duration::seconds(0)
             }
         }
+    }
 
-        fn fast_forward(self, duration: Duration) -> Self {
-            MockTimeSource {
-                current_time: self.current_time + duration
-            }
+    impl FastForward for MockTimeSource {
+        fn fast_forward(&mut self, duration: Duration) {
+            self.current_time = self.current_time + duration;
         }
     }
 
@@ -291,12 +295,12 @@ mod task {
         let mut scheduler = Scheduler::new(Duration::seconds(1), MockTimeSource::new());
 
         scheduler.after(Duration::seconds(1), 1i32);
-
         assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::seconds(1))));
         assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::seconds(1))));
 
-        scheduler.replace_time_source(MockTimeSource::new().fast_forward(Duration::milliseconds(700)));
+        scheduler.fast_forward(Duration::milliseconds(100));
         assert_eq!(scheduler.next(), Option::Some(Schedule::Current(vec![1])));
+        assert_eq!(scheduler.next(), Option::None);
     }
 }
 
