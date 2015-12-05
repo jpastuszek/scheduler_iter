@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::cmp::Ordering;
 use std::fmt;
 use std::fmt::Debug;
+use std::cmp::PartialEq;
 
 #[derive(Clone)]
 struct Task<Token> where Token: Clone {
@@ -89,6 +90,38 @@ pub enum Schedule<Token> {
     NextIn(Duration),
     Missed(Vec<Token>),
     Current(Vec<Token>)
+}
+
+impl<Token> PartialEq for Schedule<Token> where Token: PartialEq<Token> {
+    fn eq(&self, other: &Self) -> bool {
+        match self {
+            &Schedule::NextIn(ref duration) => if let &Schedule::NextIn(ref other_duration) = other {
+                duration == other_duration
+            } else {
+                false
+            },
+            &Schedule::Missed(ref tokens) => if let &Schedule::Missed(ref other_tokens) = other {
+                tokens == other_tokens
+            } else {
+                false
+            },
+            &Schedule::Current(ref tokens) => if let &Schedule::Current(ref other_tokens) = other {
+                tokens == other_tokens
+            } else {
+                false
+            }
+        }
+    }
+}
+
+impl<Token> Debug for Schedule<Token> where Token: Debug {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            &Schedule::NextIn(ref duration) => write!(f, "Schedule::NextIn({}ms)", duration.num_milliseconds()),
+            &Schedule::Missed(ref tokens) => write!(f, "Schedule::Missed({:?})", tokens),
+            &Schedule::Current(ref tokens) => write!(f, "Schedule::Current({:?})", tokens),
+        }
+    }
 }
 
 pub struct Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
@@ -182,8 +215,8 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
     }
 
     #[allow(dead_code)]
-    pub fn time_source(&self) -> &TimeSource {
-        &self.time_source
+    pub fn replace_time_source(&mut self, time_source: TS) where TS: TimeSource  {
+        self.time_source = time_source
     }
 
     fn to_time_point(&self, duration: Duration) -> TimePoint {
@@ -216,8 +249,10 @@ mod task {
             }
         }
 
-        fn fast_forward(&mut self, duration: Duration) {
-            self.current_time = self.current_time + duration;
+        fn fast_forward(self, duration: Duration) -> Self {
+            MockTimeSource {
+                current_time: self.current_time + duration
+            }
         }
     }
 
@@ -254,12 +289,14 @@ mod task {
     #[test]
     fn scheduler() {
         let mut scheduler = Scheduler::new(Duration::seconds(1), MockTimeSource::new());
+
         scheduler.after(Duration::seconds(1), 1i32);
-        if let Some(Schedule::NextIn(duration)) = scheduler.next() {
-            assert_eq!(duration, Duration::seconds(1));
-        } else {
-            panic!("Expected to get NextIn");
-        }
+
+        assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::seconds(1))));
+        assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::seconds(1))));
+
+        scheduler.replace_time_source(MockTimeSource::new().fast_forward(Duration::milliseconds(700)));
+        assert_eq!(scheduler.next(), Option::Some(Schedule::Current(vec![1])));
     }
 }
 
