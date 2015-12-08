@@ -134,7 +134,6 @@ pub struct Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
 }
 
 impl<Token> Scheduler<Token, SteadyTimeSource> where Token: Clone {
-    //TODO: way to specify how many durations it is OK to consider task current
     pub fn new(time_point_interval: Duration) -> Scheduler<Token, SteadyTimeSource> {
         Scheduler::with_time_source(time_point_interval, SteadyTimeSource::new())
     }
@@ -336,7 +335,7 @@ mod test {
     fn scheduler_after() {
         let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSource::new());
 
-        scheduler.after(Duration::seconds(1), 1i32);
+        scheduler.after(Duration::seconds(1), 1);
         assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::seconds(1))));
         assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::seconds(1))));
 
@@ -351,7 +350,7 @@ mod test {
     fn scheduler_every() {
         let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSource::new());
 
-        scheduler.every(Duration::seconds(1), 1i32);
+        scheduler.every(Duration::seconds(1), 1);
         assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::seconds(1))));
         assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::seconds(1))));
 
@@ -372,7 +371,7 @@ mod test {
     fn scheduler_every_missed() {
         let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSource::new());
 
-        scheduler.every(Duration::seconds(1), 1i32);
+        scheduler.every(Duration::seconds(1), 1);
         scheduler.fast_forward(Duration::seconds(4));
         assert_eq!(scheduler.next(), Option::Some(Schedule::Missed(vec![1, 1, 1])));
         assert_eq!(scheduler.next(), Option::Some(Schedule::Current(vec![1])));
