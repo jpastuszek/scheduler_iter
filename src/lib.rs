@@ -221,6 +221,7 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
     }
 
     fn to_time_point(&self, duration: Duration) -> TimePoint {
+        // nanoseconds gives 15250 weeks or 299 years of duration max... should do?
         let interval = self.time_point_interval.num_nanoseconds().expect("interval too large");
         let duration = duration.num_nanoseconds().expect("duration too large");
         assert!(duration >= 0);
@@ -298,8 +299,10 @@ mod test {
         let scheduler: Scheduler<(), _> = Scheduler::new(Duration::nanoseconds(1));
         assert_eq!(scheduler.to_time_point(Duration::seconds(0)), 0);
 
-        let scheduler: Scheduler<(), _> = Scheduler::new(Duration::max_value() / 10);
-        assert_eq!(scheduler.to_time_point(Duration::max_value() / 10), 0);
+        let scheduler: Scheduler<(), _> = Scheduler::new(Duration::weeks(15250) / 2);
+        assert_eq!(scheduler.to_time_point(Duration::weeks(0)), 0);
+        assert_eq!(scheduler.to_time_point(Duration::weeks(15250) / 2), 1);
+        assert_eq!(scheduler.to_time_point(Duration::weeks(15250)), 2);
     }
 
     #[test]
@@ -316,9 +319,10 @@ mod test {
         assert_eq!(scheduler.to_duration(0), Duration::nanoseconds(0));
         assert_eq!(scheduler.to_duration(1), Duration::nanoseconds(1));
 
-        let scheduler: Scheduler<(), _> = Scheduler::new(Duration::max_value() / 10);
+        let scheduler: Scheduler<(), _> = Scheduler::new(Duration::weeks(15250) / 2);
         assert_eq!(scheduler.to_duration(0), Duration::seconds(0));
-        assert_eq!(scheduler.to_duration(1), Duration::max_value() / 10);
+        assert_eq!(scheduler.to_duration(1), Duration::weeks(15250) / 2);
+        assert_eq!(scheduler.to_duration(2), Duration::weeks(15250));
     }
 
     #[test]
@@ -378,16 +382,25 @@ mod test {
     fn scheduler_limits() {
         let mut scheduler = Scheduler::with_time_source(Duration::nanoseconds(1), MockTimeSource::new());
 
-        scheduler.after(Duration::seconds(1), 1i32);
-        assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::seconds(1))));
+        scheduler.after(Duration::nanoseconds(1), 1);
+        assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::nanoseconds(1))));
 
-        scheduler.fast_forward(Duration::milliseconds(100));
-        assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::milliseconds(900))));
+        scheduler.fast_forward(Duration::nanoseconds(1));
+        assert_eq!(scheduler.next(), Option::Some(Schedule::Current(vec![1])));
 
-        let mut scheduler = Scheduler::with_time_source(Duration::max_value() / 10, MockTimeSource::new());
+        scheduler.after(Duration::weeks(15250), 2);
+        assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::weeks(15250))));
 
-        scheduler.after(Duration::max_value() / 10, 1i32);
-        assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::max_value() / 10)));
+        scheduler.fast_forward(Duration::weeks(15250));
+        assert_eq!(scheduler.next(), Option::Some(Schedule::Current(vec![2])));
+
+        let mut scheduler = Scheduler::with_time_source(Duration::weeks(15250) / 2, MockTimeSource::new());
+
+        scheduler.after(Duration::weeks(15250) / 2, 1);
+        assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::weeks(15250) / 2)));
+
+        scheduler.fast_forward(Duration::weeks(15250) / 2);
+        assert_eq!(scheduler.next(), Option::Some(Schedule::Current(vec![1])));
     }
 }
 
