@@ -221,15 +221,15 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
     }
 
     fn to_time_point(&self, duration: Duration) -> TimePoint {
-        let interval = self.time_point_interval.num_microseconds().unwrap();
-        let duration = duration.num_microseconds().unwrap();
+        let interval = self.time_point_interval.num_nanoseconds().expect("interval too large");
+        let duration = duration.num_nanoseconds().expect("duration too large");
         assert!(duration >= 0);
 
         (duration / interval) as TimePoint
     }
 
     fn to_duration(&self, time_point: TimePoint) -> Duration {
-        Duration::microseconds(self.time_point_interval.num_microseconds().unwrap() * time_point as i64)
+        Duration::nanoseconds(self.time_point_interval.num_nanoseconds().expect("time point interval too large") * time_point as i64)
     }
 }
 
@@ -294,6 +294,34 @@ mod test {
     }
 
     #[test]
+    fn scheduler_to_time_point_limits() {
+        let scheduler: Scheduler<(), _> = Scheduler::new(Duration::nanoseconds(1));
+        assert_eq!(scheduler.to_time_point(Duration::seconds(0)), 0);
+
+        let scheduler: Scheduler<(), _> = Scheduler::new(Duration::max_value() / 10);
+        assert_eq!(scheduler.to_time_point(Duration::max_value() / 10), 0);
+    }
+
+    #[test]
+    fn scheduler_to_duration() {
+        let scheduler: Scheduler<(), _> = Scheduler::new(Duration::seconds(1));
+        assert_eq!(scheduler.to_duration(0), Duration::seconds(0));
+        assert_eq!(scheduler.to_duration(1), Duration::seconds(1));
+        assert_eq!(scheduler.to_duration(2), Duration::seconds(2));
+    }
+
+    #[test]
+    fn scheduler_to_duration_limits() {
+        let scheduler: Scheduler<(), _> = Scheduler::new(Duration::nanoseconds(1));
+        assert_eq!(scheduler.to_duration(0), Duration::nanoseconds(0));
+        assert_eq!(scheduler.to_duration(1), Duration::nanoseconds(1));
+
+        let scheduler: Scheduler<(), _> = Scheduler::new(Duration::max_value() / 10);
+        assert_eq!(scheduler.to_duration(0), Duration::seconds(0));
+        assert_eq!(scheduler.to_duration(1), Duration::max_value() / 10);
+    }
+
+    #[test]
     fn scheduler_empty() {
         let mut scheduler: Scheduler<(), _> = Scheduler::new(Duration::seconds(1));
         assert_eq!(scheduler.next(), Option::None);
@@ -344,6 +372,22 @@ mod test {
         scheduler.fast_forward(Duration::seconds(4));
         assert_eq!(scheduler.next(), Option::Some(Schedule::Missed(vec![1, 1, 1])));
         assert_eq!(scheduler.next(), Option::Some(Schedule::Current(vec![1])));
+    }
+
+    #[test]
+    fn scheduler_limits() {
+        let mut scheduler = Scheduler::with_time_source(Duration::nanoseconds(1), MockTimeSource::new());
+
+        scheduler.after(Duration::seconds(1), 1i32);
+        assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::seconds(1))));
+
+        scheduler.fast_forward(Duration::milliseconds(100));
+        assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::milliseconds(900))));
+
+        let mut scheduler = Scheduler::with_time_source(Duration::max_value() / 10, MockTimeSource::new());
+
+        scheduler.after(Duration::max_value() / 10, 1i32);
+        assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::max_value() / 10)));
     }
 }
 
