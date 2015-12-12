@@ -6,6 +6,7 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::fmt::Debug;
 use std::cmp::PartialEq;
+use std::thread::sleep;
 
 #[derive(Clone)]
 struct Task<Token> where Token: Clone {
@@ -75,6 +76,15 @@ impl SteadyTimeSource {
         SteadyTimeSource {
             offset: SteadyTime::now()
         }
+    }
+}
+
+impl Wait for SteadyTimeSource {
+    fn wait(&mut self, duration: Duration) {
+        sleep(std::time::Duration::new(
+            duration.num_seconds() as u64,
+            (duration.num_nanoseconds().expect("sleep duration too large") - duration.num_seconds() * 1_000_000_000) as u32
+        ));
     }
 }
 
@@ -472,5 +482,19 @@ mod test {
         assert_eq!(scheduler.wait_with_missed_handler(|m| missed = m.clone()), Option::Some(vec![2]));
         assert_eq!(missed, vec![0, 1]);
     }
+
+    #[test]
+    fn scheduler_wait_real_time() {
+        let mut scheduler = Scheduler::new(Duration::milliseconds(100));
+
+        scheduler.after(Duration::milliseconds(0), 0);
+        scheduler.after(Duration::milliseconds(100), 1);
+        scheduler.after(Duration::milliseconds(200), 2);
+
+        assert_eq!(scheduler.wait(), Option::Some(vec![0]));
+        assert_eq!(scheduler.wait(), Option::Some(vec![1]));
+        assert_eq!(scheduler.wait(), Option::Some(vec![2]));
+    }
+
 }
 
