@@ -32,7 +32,7 @@ impl<Token> fmt::Debug for Task<Token> where Token: Clone {
 
 impl<Token> Task<Token> where Token: Clone {
     fn new(interval: Duration, run_offset: Duration, bond: TaskBond, token: Token) -> Task<Token> {
-        assert!(interval > Duration::seconds(0)); // negative interval would make schedule go back in time!
+        assert!(interval >= Duration::seconds(0)); // negative interval would make schedule go back in time!
         Task {
             interval: interval,
             run_offset: run_offset,
@@ -62,6 +62,10 @@ pub trait FastForward {
     fn fast_forward(&mut self, duration: Duration);
 }
 
+pub trait Wait {
+    fn wait(&mut self, duration: Duration);
+}
+
 pub struct SteadyTimeSource {
     offset: SteadyTime
 }
@@ -89,6 +93,7 @@ enum SchedulerAction {
     Yield(TimePoint)
 }
 
+//TODO: better name?
 pub enum Schedule<Token> {
     NextIn(Duration),
     Missed(Vec<Token>),
@@ -136,6 +141,34 @@ pub struct Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
 impl<Token> Scheduler<Token, SteadyTimeSource> where Token: Clone {
     pub fn new(time_point_interval: Duration) -> Scheduler<Token, SteadyTimeSource> {
         Scheduler::with_time_source(time_point_interval, SteadyTimeSource::new())
+    }
+}
+
+impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource + Wait, Token: Clone {
+    pub fn wait(&mut self) -> Option<Vec<Token>> where TS: Wait {
+        self.wait_with_missed_handler(|_| ())
+    }
+
+    pub fn wait_with_missed_handler<MH>(&mut self, missed_handler: MH) -> Option<Vec<Token>>
+    where MH: FnMut(Vec<Token>) -> (), TS: Wait {
+        match self.next() {
+            Option::Some(schedule) => match schedule {
+                Schedule::NextIn(duration) => {
+                    //TODO: can we protect against wait() that does not move us forward?
+                    self.time_source.wait(duration);
+                    self.wait_with_missed_handler(missed_handler)
+                },
+                Schedule::Missed(missed_tokens) => {
+                    let mut missed_handler = missed_handler;
+                    missed_handler(missed_tokens);
+                    self.wait_with_missed_handler(missed_handler)
+                },
+                Schedule::Current(tokens) => {
+                    Some(tokens)
+                }
+            },
+            Option::None => None
+        }
     }
 }
 
@@ -263,6 +296,12 @@ mod test {
         }
     }
 
+    impl Wait for MockTimeSource {
+        fn wait(&mut self, duration: Duration) {
+            self.current_time = self.current_time + duration;
+        }
+    }
+
     impl TimeSource for MockTimeSource {
         fn now(&self) -> Duration {
             self.current_time
@@ -335,6 +374,9 @@ mod test {
     fn scheduler_after() {
         let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSource::new());
 
+        scheduler.after(Duration::seconds(0), 0);
+        assert_eq!(scheduler.next(), Option::Some(Schedule::Current(vec![0])));
+
         scheduler.after(Duration::seconds(1), 1);
         assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::seconds(1))));
         assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::seconds(1))));
@@ -400,6 +442,35 @@ mod test {
 
         scheduler.fast_forward(Duration::weeks(15250) / 2);
         assert_eq!(scheduler.next(), Option::Some(Schedule::Current(vec![1])));
+    }
+
+    #[test]
+    fn scheduler_wait() {
+        let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSource::new());
+
+        scheduler.after(Duration::seconds(0), 0);
+        scheduler.after(Duration::seconds(1), 1);
+        scheduler.after(Duration::seconds(2), 2);
+
+        scheduler.fast_forward(Duration::seconds(1));
+        // ignore missed
+        assert_eq!(scheduler.wait(), Option::Some(vec![1]));
+        assert_eq!(scheduler.wait(), Option::Some(vec![2]));
+    }
+
+    #[test]
+    fn scheduler_wait_with_missed_handler() {
+        let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSource::new());
+
+        scheduler.after(Duration::seconds(0), 0);
+        scheduler.after(Duration::seconds(1), 1);
+        scheduler.after(Duration::seconds(2), 2);
+
+        let mut missed = vec![];
+
+        scheduler.fast_forward(Duration::seconds(2));
+        assert_eq!(scheduler.wait_with_missed_handler(|m| missed = m.clone()), Option::Some(vec![2]));
+        assert_eq!(missed, vec![0, 1]);
     }
 }
 
