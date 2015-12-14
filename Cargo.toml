@@ -2,6 +2,8 @@
 name = "token_scheduler"
 version = "0.1.0"
 authors = ["Jakub Pastuszek <jpastuszek@gmail.com>"]
+description = "Schedule tokens and get them back when it's time"
+license = "MIT"
 
 [dependencies]
 time = "~ 0.1"
