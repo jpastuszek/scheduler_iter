@@ -156,22 +156,22 @@ impl<Token> Scheduler<Token, SteadyTimeSource> where Token: Clone {
 
 impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource + Wait, Token: Clone {
     pub fn wait(&mut self) -> Option<Vec<Token>> where TS: Wait {
-        self.wait_with_missed_handler(|_| ())
+        self.wait_with_missed(|_| ())
     }
 
-    pub fn wait_with_missed_handler<MH>(&mut self, missed_handler: MH) -> Option<Vec<Token>>
+    pub fn wait_with_missed<MH>(&mut self, missed_handler: MH) -> Option<Vec<Token>>
     where MH: FnMut(Vec<Token>) -> (), TS: Wait {
         match self.next() {
             Option::Some(schedule) => match schedule {
                 Schedule::NextIn(duration) => {
                     //TODO: can we protect against wait() that does not move us forward?
                     self.time_source.wait(duration);
-                    self.wait_with_missed_handler(missed_handler)
+                    self.wait_with_missed(missed_handler)
                 },
                 Schedule::Missed(missed_tokens) => {
                     let mut missed_handler = missed_handler;
                     missed_handler(missed_tokens);
-                    self.wait_with_missed_handler(missed_handler)
+                    self.wait_with_missed(missed_handler)
                 },
                 Schedule::Current(tokens) => {
                     Some(tokens)
@@ -469,7 +469,7 @@ mod test {
     }
 
     #[test]
-    fn scheduler_wait_with_missed_handler() {
+    fn scheduler_wait_with_missed() {
         let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSource::new());
 
         scheduler.after(Duration::seconds(0), 0);
@@ -479,7 +479,7 @@ mod test {
         let mut missed = vec![];
 
         scheduler.fast_forward(Duration::seconds(2));
-        assert_eq!(scheduler.wait_with_missed_handler(|m| missed = m.clone()), Option::Some(vec![2]));
+        assert_eq!(scheduler.wait_with_missed(|m| missed = m.clone()), Option::Some(vec![2]));
         assert_eq!(missed, vec![0, 1]);
     }
 
