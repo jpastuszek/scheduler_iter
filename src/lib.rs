@@ -154,30 +154,55 @@ impl<Token> Scheduler<Token, SteadyTimeSource> where Token: Clone {
     }
 }
 
-impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource + Wait, Token: Clone {
-    pub fn wait(&mut self) -> Option<Vec<Token>> where TS: Wait {
-        self.wait_with_missed(|_| ())
-    }
+//TODO: Error trait
+pub enum WaitError<Token> {
+    Empty,
+    Missed(Vec<Token>)
+}
 
-    pub fn wait_with_missed<MH>(&mut self, missed_handler: MH) -> Option<Vec<Token>>
-    where MH: FnMut(Vec<Token>) -> (), TS: Wait {
+impl<Token> PartialEq for WaitError<Token> where Token: PartialEq<Token> {
+    fn eq(&self, other: &Self) -> bool {
+        match self {
+            &WaitError::Empty => if let &WaitError::Empty = other {
+                true
+            } else {
+                false
+            },
+            &WaitError::Missed(ref tokens) => if let &WaitError::Missed(ref other_tokens) = other {
+                tokens == other_tokens
+            } else {
+                false
+            }
+        }
+    }
+}
+
+impl<Token> fmt::Debug for WaitError<Token> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            &WaitError::Empty => write!(f, "scheduler is empty"),
+            &WaitError::Missed(ref tokens) => write!(f, "scheduler missed {} tokens", tokens.len())
+        }
+    }
+}
+
+impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource + Wait, Token: Clone {
+    pub fn wait(&mut self) -> Result<Vec<Token>, WaitError<Token>> where TS: Wait {
         match self.next() {
             Option::Some(schedule) => match schedule {
                 Schedule::NextIn(duration) => {
                     //TODO: can we protect against wait() that does not move us forward?
                     self.time_source.wait(duration);
-                    self.wait_with_missed(missed_handler)
+                    self.wait()
                 },
                 Schedule::Missed(missed_tokens) => {
-                    let mut missed_handler = missed_handler;
-                    missed_handler(missed_tokens);
-                    self.wait_with_missed(missed_handler)
+                    Err(WaitError::Missed(missed_tokens))
                 },
                 Schedule::Current(tokens) => {
-                    Some(tokens)
+                    Ok(tokens)
                 }
             },
-            Option::None => None
+            Option::None => Err(WaitError::Empty)
         }
     }
 }
@@ -244,6 +269,8 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
             }
         }
     }
+
+    //TODO: fn cancel(&mut self, token: Token) -> bool to cancel scheduled token
 
     fn consume(&mut self, time_points: Vec<TimePoint>) -> Vec<Token> {
         let mut tasks: Vec<Task<Token>> = time_points.iter().flat_map(|time_point|
@@ -462,10 +489,9 @@ mod test {
         scheduler.after(Duration::seconds(1), 1);
         scheduler.after(Duration::seconds(2), 2);
 
-        scheduler.fast_forward(Duration::seconds(1));
-        // ignore missed
-        assert_eq!(scheduler.wait(), Option::Some(vec![1]));
-        assert_eq!(scheduler.wait(), Option::Some(vec![2]));
+        assert_eq!(scheduler.wait(), Result::Ok(vec![0]));
+        assert_eq!(scheduler.wait(), Result::Ok(vec![1]));
+        assert_eq!(scheduler.wait(), Result::Ok(vec![2]));
     }
 
     #[test]
@@ -476,11 +502,9 @@ mod test {
         scheduler.after(Duration::seconds(1), 1);
         scheduler.after(Duration::seconds(2), 2);
 
-        let mut missed = vec![];
-
         scheduler.fast_forward(Duration::seconds(2));
-        assert_eq!(scheduler.wait_with_missed(|m| missed = m.clone()), Option::Some(vec![2]));
-        assert_eq!(missed, vec![0, 1]);
+        assert_eq!(scheduler.wait(), Result::Err(WaitError::Missed(vec![0, 1])));
+        assert_eq!(scheduler.wait(), Result::Ok(vec![2]));
     }
 
     #[test]
@@ -491,10 +515,9 @@ mod test {
         scheduler.after(Duration::milliseconds(100), 1);
         scheduler.after(Duration::milliseconds(200), 2);
 
-        assert_eq!(scheduler.wait(), Option::Some(vec![0]));
-        assert_eq!(scheduler.wait(), Option::Some(vec![1]));
-        assert_eq!(scheduler.wait(), Option::Some(vec![2]));
+        assert_eq!(scheduler.wait(), Result::Ok(vec![0]));
+        assert_eq!(scheduler.wait(), Result::Ok(vec![1]));
+        assert_eq!(scheduler.wait(), Result::Ok(vec![2]));
     }
-
 }
 
