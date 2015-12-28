@@ -23,15 +23,6 @@ enum TaskBond {
     Perpetual
 }
 
-impl<Token> fmt::Debug for Task<Token> where Token: Clone {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self.bond {
-            TaskBond::Perpetual => write!(f, "Task(every {}ms)", self.interval.num_milliseconds()),
-            TaskBond::OneOff => write!(f, "Task(after {}ms)", self.interval.num_milliseconds())
-        }
-    }
-}
-
 impl<Token> Task<Token> where Token: Clone {
     fn new(interval: Duration, run_offset: Duration, bond: TaskBond, token: Token) -> Task<Token> {
         assert!(interval >= Duration::seconds(0)); // negative interval would make schedule go back in time!
@@ -154,73 +145,6 @@ impl<Token> Scheduler<Token, SteadyTimeSource> where Token: Clone {
     }
 }
 
-pub enum WaitError<Token> {
-    Empty,
-    Missed(Vec<Token>)
-}
-
-impl<Token> PartialEq for WaitError<Token> where Token: PartialEq<Token> {
-    fn eq(&self, other: &Self) -> bool {
-        match self {
-            &WaitError::Empty => if let &WaitError::Empty = other {
-                true
-            } else {
-                false
-            },
-            &WaitError::Missed(ref tokens) => if let &WaitError::Missed(ref other_tokens) = other {
-                tokens == other_tokens
-            } else {
-                false
-            }
-        }
-    }
-}
-
-impl<Token> fmt::Debug for WaitError<Token> where Token: fmt::Debug {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &WaitError::Empty => write!(f, "WaitError::Empty"),
-            &WaitError::Missed(ref tokens) => write!(f, "WaitError::Missed({:?})", tokens)
-        }
-    }
-}
-
-impl<Token> fmt::Display for WaitError<Token> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &WaitError::Empty => write!(f, "scheduler is empty"),
-            &WaitError::Missed(ref tokens) => write!(f, "scheduler missed {} tokens", tokens.len())
-        }
-    }
-}
-
-impl<Token> Error for WaitError<Token> where Token: fmt::Debug + Any {
-    fn description(&self) -> &str {
-        "problem while waiting for next schedule"
-    }
-}
-
-impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource + Wait, Token: Clone {
-    pub fn wait(&mut self) -> Result<Vec<Token>, WaitError<Token>> where TS: Wait {
-        match self.next() {
-            Option::Some(schedule) => match schedule {
-                Schedule::NextIn(duration) => {
-                    //TODO: can we protect against wait() that does not move us forward?
-                    self.time_source.wait(duration);
-                    self.wait()
-                },
-                Schedule::Missed(missed_tokens) => {
-                    Err(WaitError::Missed(missed_tokens))
-                },
-                Schedule::Current(tokens) => {
-                    Ok(tokens)
-                }
-            },
-            Option::None => Err(WaitError::Empty)
-        }
-    }
-}
-
 impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
     pub fn with_time_source(time_point_interval: Duration, time_source: TS) -> Scheduler<Token, TS> {
         assert!(time_point_interval > Duration::seconds(0));
@@ -323,6 +247,73 @@ impl<Token, TS> FastForward for Scheduler<Token, TS> where TS: TimeSource + Fast
     }
 }
 
+pub enum WaitError<Token> {
+    Empty,
+    Missed(Vec<Token>)
+}
+
+impl<Token> PartialEq for WaitError<Token> where Token: PartialEq<Token> {
+    fn eq(&self, other: &Self) -> bool {
+        match self {
+            &WaitError::Empty => if let &WaitError::Empty = other {
+                true
+            } else {
+                false
+            },
+            &WaitError::Missed(ref tokens) => if let &WaitError::Missed(ref other_tokens) = other {
+                tokens == other_tokens
+            } else {
+                false
+            }
+        }
+    }
+}
+
+impl<Token> fmt::Debug for WaitError<Token> where Token: fmt::Debug {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            &WaitError::Empty => write!(f, "WaitError::Empty"),
+            &WaitError::Missed(ref tokens) => write!(f, "WaitError::Missed({:?})", tokens)
+        }
+    }
+}
+
+impl<Token> fmt::Display for WaitError<Token> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            &WaitError::Empty => write!(f, "scheduler is empty"),
+            &WaitError::Missed(ref tokens) => write!(f, "scheduler missed {} tokens", tokens.len())
+        }
+    }
+}
+
+impl<Token> Error for WaitError<Token> where Token: fmt::Debug + Any {
+    fn description(&self) -> &str {
+        "problem while waiting for next schedule"
+    }
+}
+
+impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource + Wait, Token: Clone {
+    pub fn wait(&mut self) -> Result<Vec<Token>, WaitError<Token>> where TS: Wait {
+        match self.next() {
+            Option::Some(schedule) => match schedule {
+                Schedule::NextIn(duration) => {
+                    //TODO: can we protect against wait() that does not move us forward?
+                    self.time_source.wait(duration);
+                    self.wait()
+                },
+                Schedule::Missed(missed_tokens) => {
+                    Err(WaitError::Missed(missed_tokens))
+                },
+                Schedule::Current(tokens) => {
+                    Ok(tokens)
+                }
+            },
+            Option::None => Err(WaitError::Empty)
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -364,7 +355,7 @@ mod test {
         let now = Duration::seconds(0);
         let interval = Duration::seconds(1);
         let task = Task::new(interval, now, TaskBond::OneOff, 42);
-        println!("task: {:?}", task);
+
         assert_eq!(task.schedule(), now + interval);
         assert_eq!(task.next().next().schedule(), now + interval * 3);
     }
