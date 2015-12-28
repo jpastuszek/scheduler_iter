@@ -4,7 +4,8 @@ use time::{SteadyTime, Duration};
 use std::collections::BTreeMap;
 use std::cmp::Ordering;
 use std::fmt;
-use std::fmt::Debug;
+use std::error::Error;
+use std::any::Any;
 use std::cmp::PartialEq;
 use std::thread::sleep;
 
@@ -103,7 +104,6 @@ enum SchedulerAction {
     Yield(TimePoint)
 }
 
-//TODO: better name?
 pub enum Schedule<Token> {
     NextIn(Duration),
     Missed(Vec<Token>),
@@ -132,7 +132,7 @@ impl<Token> PartialEq for Schedule<Token> where Token: PartialEq<Token> {
     }
 }
 
-impl<Token> Debug for Schedule<Token> where Token: Debug {
+impl<Token> fmt::Debug for Schedule<Token> where Token: fmt::Debug {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             &Schedule::NextIn(ref duration) => write!(f, "Schedule::NextIn({}ms)", duration.num_milliseconds()),
@@ -154,7 +154,6 @@ impl<Token> Scheduler<Token, SteadyTimeSource> where Token: Clone {
     }
 }
 
-//TODO: Error trait
 pub enum WaitError<Token> {
     Empty,
     Missed(Vec<Token>)
@@ -177,12 +176,27 @@ impl<Token> PartialEq for WaitError<Token> where Token: PartialEq<Token> {
     }
 }
 
-impl<Token> fmt::Debug for WaitError<Token> {
+impl<Token> fmt::Debug for WaitError<Token> where Token: fmt::Debug {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            &WaitError::Empty => write!(f, "WaitError::Empty"),
+            &WaitError::Missed(ref tokens) => write!(f, "WaitError::Missed({:?})", tokens)
+        }
+    }
+}
+
+impl<Token> fmt::Display for WaitError<Token> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             &WaitError::Empty => write!(f, "scheduler is empty"),
             &WaitError::Missed(ref tokens) => write!(f, "scheduler missed {} tokens", tokens.len())
         }
+    }
+}
+
+impl<Token> Error for WaitError<Token> where Token: fmt::Debug + Any {
+    fn description(&self) -> &str {
+        "problem while waiting for next schedule"
     }
 }
 
