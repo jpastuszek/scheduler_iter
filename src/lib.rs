@@ -208,11 +208,11 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
         }
     }
 
-    pub fn cancel(&mut self, token: Token) where Token: PartialEq<Token> {
+    pub fn cancel(&mut self, token: &Token) where Token: PartialEq<Token> {
         let mut empty_time_points = vec![];
 
         for (ref time_point, ref mut tasks) in self.tasks.iter_mut() {
-            tasks.retain(|task| task.token != token);
+            tasks.retain(|task| task.token != *token);
             if tasks.is_empty() {
                 empty_time_points.push(*time_point.clone());
             }
@@ -547,8 +547,8 @@ mod test {
         scheduler.after(Duration::milliseconds(200), 2);
         scheduler.after(Duration::milliseconds(300), 4);
 
-        scheduler.cancel(1);
-        scheduler.cancel(2);
+        scheduler.cancel(&1);
+        scheduler.cancel(&2);
 
         assert_eq!(scheduler.wait(), Result::Ok(vec![0]));
         assert_eq!(scheduler.wait(), Result::Ok(vec![4]));
@@ -565,8 +565,8 @@ mod test {
         scheduler.after(Duration::milliseconds(200), 4);
         scheduler.after(Duration::milliseconds(200), 5);
 
-        scheduler.cancel(1);
-        scheduler.cancel(4);
+        scheduler.cancel(&1);
+        scheduler.cancel(&4);
 
         assert_eq!(scheduler.wait(), Result::Ok(vec![0]));
         assert_eq!(scheduler.wait(), Result::Ok(vec![2, 3]));
