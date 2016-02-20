@@ -306,7 +306,7 @@ impl<Token> Error for WaitError<Token> where Token: fmt::Debug + Any {
     }
 }
 
-impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource + Wait, Token: Clone {
+impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
     //TODO: some way to integrate it with other async events in the program in a way that:
     // * there is no need to loop over with short sleep - consume CPU
     // * there is no latency - at the moment token is abailable it gets consumed by clint no mater
@@ -381,13 +381,37 @@ mod test {
         }
     }
 
-    impl Wait for MockTimeSource {
+    impl TimeSource for MockTimeSource {
+        fn now(&self) -> Duration {
+            self.current_time
+        }
+    }
+
+    struct MockTimeSourceWait {
+        current_time: Duration
+    }
+
+    impl MockTimeSourceWait {
+        fn new() -> MockTimeSourceWait {
+            MockTimeSourceWait {
+                current_time: Duration::seconds(0)
+            }
+        }
+    }
+
+    impl FastForward for MockTimeSourceWait {
+        fn fast_forward(&mut self, duration: Duration) {
+            self.current_time = self.current_time + duration;
+        }
+    }
+
+    impl Wait for MockTimeSourceWait {
         fn wait(&mut self, duration: Duration) {
             self.current_time = self.current_time + duration;
         }
     }
 
-    impl TimeSource for MockTimeSource {
+    impl TimeSource for MockTimeSourceWait {
         fn now(&self) -> Duration {
             self.current_time
         }
@@ -531,7 +555,7 @@ mod test {
 
     #[test]
     fn scheduler_wait() {
-        let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSource::new());
+        let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSourceWait::new());
 
         scheduler.after(Duration::seconds(0), 0);
         scheduler.after(Duration::seconds(1), 1);
@@ -544,7 +568,7 @@ mod test {
 
     #[test]
     fn scheduler_wait_with_overrun() {
-        let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSource::new());
+        let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSourceWait::new());
 
         scheduler.after(Duration::seconds(0), 0);
         scheduler.after(Duration::seconds(1), 1);
