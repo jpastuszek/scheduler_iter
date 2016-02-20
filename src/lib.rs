@@ -97,7 +97,7 @@ enum SchedulerAction {
 
 pub enum Schedule<Token> {
     NextIn(Duration),
-    Missed(Vec<Token>),
+    Overrun(Vec<Token>),
     Current(Vec<Token>)
 }
 
@@ -109,7 +109,7 @@ impl<Token> PartialEq for Schedule<Token> where Token: PartialEq<Token> {
             } else {
                 false
             },
-            &Schedule::Missed(ref tokens) => if let &Schedule::Missed(ref other_tokens) = other {
+            &Schedule::Overrun(ref tokens) => if let &Schedule::Overrun(ref other_tokens) = other {
                 tokens == other_tokens
             } else {
                 false
@@ -127,7 +127,7 @@ impl<Token> fmt::Debug for Schedule<Token> where Token: fmt::Debug {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             &Schedule::NextIn(ref duration) => write!(f, "Schedule::NextIn({}ms)", duration.num_milliseconds()),
-            &Schedule::Missed(ref tokens) => write!(f, "Schedule::Missed({:?})", tokens),
+            &Schedule::Overrun(ref tokens) => write!(f, "Schedule::Overrun({:?})", tokens),
             &Schedule::Current(ref tokens) => write!(f, "Schedule::Current({:?})", tokens),
         }
     }
@@ -186,6 +186,7 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
         }
     }
 
+    //TODO: rename to get()?
     pub fn next(&mut self) -> Option<Schedule<Token>> {
         match self.next_action() {
             SchedulerAction::None => None,
@@ -193,20 +194,22 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
                 Some(Schedule::NextIn(duration))
             },
             SchedulerAction::Skip(time_points) => {
-                let mut missed = Vec::new();
+                let mut overrun = Vec::new();
 
-                missed.extend(self.consume(time_points));
-                // collect all reschedules of consumed tasks if they end up missed already
+                overrun.extend(self.consume(time_points));
+                // collect all reschedules of consumed tasks if they end up overrun already
                 while let SchedulerAction::Skip(time_points) = self.next_action() {
-                    missed.extend(self.consume(time_points));
+                    overrun.extend(self.consume(time_points));
                 }
-                Some(Schedule::Missed(missed))
+                Some(Schedule::Overrun(overrun))
             },
             SchedulerAction::Yield(time_point) => {
                 Some(Schedule::Current(self.consume(vec![time_point])))
             }
         }
     }
+
+    //TODO: get_with_channel() -> Wait(channel) where channel is connected with timer thread
 
     pub fn cancel(&mut self, token: &Token) where Token: PartialEq<Token> {
         let mut empty_time_points = vec![];
@@ -262,7 +265,7 @@ impl<Token, TS> FastForward for Scheduler<Token, TS> where TS: TimeSource + Fast
 
 pub enum WaitError<Token> {
     Empty,
-    Missed(Vec<Token>)
+    Overrun(Vec<Token>)
 }
 
 impl<Token> PartialEq for WaitError<Token> where Token: PartialEq<Token> {
@@ -273,7 +276,7 @@ impl<Token> PartialEq for WaitError<Token> where Token: PartialEq<Token> {
             } else {
                 false
             },
-            &WaitError::Missed(ref tokens) => if let &WaitError::Missed(ref other_tokens) = other {
+            &WaitError::Overrun(ref tokens) => if let &WaitError::Overrun(ref other_tokens) = other {
                 tokens == other_tokens
             } else {
                 false
@@ -286,7 +289,7 @@ impl<Token> fmt::Debug for WaitError<Token> where Token: fmt::Debug {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             &WaitError::Empty => write!(f, "WaitError::Empty"),
-            &WaitError::Missed(ref tokens) => write!(f, "WaitError::Missed({:?})", tokens)
+            &WaitError::Overrun(ref tokens) => write!(f, "WaitError::Overrun({:?})", tokens)
         }
     }
 }
@@ -295,7 +298,7 @@ impl<Token> fmt::Display for WaitError<Token> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             &WaitError::Empty => write!(f, "scheduler is empty"),
-            &WaitError::Missed(ref tokens) => write!(f, "scheduler missed {} tokens", tokens.len())
+            &WaitError::Overrun(ref tokens) => write!(f, "scheduler overrun {} tokens", tokens.len())
         }
     }
 }
@@ -315,8 +318,8 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource + Wait, Token: Clone {
                     self.time_source.wait(duration);
                     self.wait()
                 },
-                Schedule::Missed(missed_tokens) => {
-                    Err(WaitError::Missed(missed_tokens))
+                Schedule::Overrun(overrun_tokens) => {
+                    Err(WaitError::Overrun(overrun_tokens))
                 },
                 Schedule::Current(tokens) => {
                     Ok(tokens)
@@ -465,12 +468,12 @@ mod test {
     }
 
     #[test]
-    fn scheduler_every_missed() {
+    fn scheduler_every_with_overrun() {
         let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSource::new());
 
         scheduler.every(Duration::seconds(1), 1);
         scheduler.fast_forward(Duration::seconds(4));
-        assert_eq!(scheduler.next(), Option::Some(Schedule::Missed(vec![1, 1, 1])));
+        assert_eq!(scheduler.next(), Option::Some(Schedule::Overrun(vec![1, 1, 1])));
         assert_eq!(scheduler.next(), Option::Some(Schedule::Current(vec![1])));
     }
 
@@ -513,7 +516,7 @@ mod test {
     }
 
     #[test]
-    fn scheduler_wait_with_missed() {
+    fn scheduler_wait_with_overrun() {
         let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSource::new());
 
         scheduler.after(Duration::seconds(0), 0);
@@ -521,7 +524,7 @@ mod test {
         scheduler.after(Duration::seconds(2), 2);
 
         scheduler.fast_forward(Duration::seconds(2));
-        assert_eq!(scheduler.wait(), Result::Err(WaitError::Missed(vec![0, 1])));
+        assert_eq!(scheduler.wait(), Result::Err(WaitError::Overrun(vec![0, 1])));
         assert_eq!(scheduler.wait(), Result::Ok(vec![2]));
     }
 
