@@ -267,17 +267,10 @@ pub enum WaitError<Token> {
 
 impl<Token> PartialEq for WaitError<Token> where Token: PartialEq<Token> {
     fn eq(&self, other: &Self) -> bool {
-        match self {
-            &WaitError::Empty => if let &WaitError::Empty = other {
-                true
-            } else {
-                false
-            },
-            &WaitError::Overrun(ref tokens) => if let &WaitError::Overrun(ref other_tokens) = other {
-                tokens == other_tokens
-            } else {
-                false
-            }
+        match (self, other) {
+            (&WaitError::Empty, &WaitError::Empty) => true,
+            (&WaitError::Overrun(ref tokens), &WaitError::Overrun(ref other_tokens)) => tokens == other_tokens,
+            _ => false
         }
     }
 }
@@ -314,22 +307,11 @@ pub enum WaitTimeoutError<Token> {
 
 impl<Token> PartialEq for WaitTimeoutError<Token> where Token: PartialEq<Token> {
     fn eq(&self, other: &Self) -> bool {
-        match self {
-            &WaitTimeoutError::Empty => if let &WaitTimeoutError::Empty = other {
-                true
-            } else {
-                false
-            },
-            &WaitTimeoutError::Timeout => if let &WaitTimeoutError::Timeout = other {
-                true
-            } else {
-                false
-            },
-            &WaitTimeoutError::Overrun(ref tokens) => if let &WaitTimeoutError::Overrun(ref other_tokens) = other {
-                tokens == other_tokens
-            } else {
-                false
-            }
+        match (self, other) {
+            (&WaitTimeoutError::Empty, &WaitTimeoutError::Empty) => true,
+            (&WaitTimeoutError::Timeout, &WaitTimeoutError::Timeout) => true,
+            (&WaitTimeoutError::Overrun(ref tokens), &WaitTimeoutError::Overrun(ref other_tokens)) => tokens == other_tokens,
+            _ => false
         }
     }
 }
