@@ -186,7 +186,6 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
         }
     }
 
-    //TODO: rename to get()?
     pub fn next(&mut self) -> Option<Schedule<Token>> {
         match self.next_action() {
             SchedulerAction::None => None,
@@ -208,8 +207,6 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
             }
         }
     }
-
-    //TODO: get_with_channel() -> Wait(channel) where channel is connected with timer thread
 
     pub fn cancel(&mut self, token: &Token) where Token: PartialEq<Token> {
         let mut empty_time_points = vec![];
@@ -310,6 +307,19 @@ impl<Token> Error for WaitError<Token> where Token: fmt::Debug + Any {
 }
 
 impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource + Wait, Token: Clone {
+    //TODO: some way to integrate it with other async events in the program in a way that:
+    // * there is no need to loop over with short sleep - consume CPU
+    // * there is no latency - at the moment token is abailable it gets consumed by clint no mater
+    // if he waits for other events like channels or IO
+    // next_try() - can do loop with sleep... may be part of bigger sollution
+    // wait() - just blocking
+    // wait_timeout() - if WaitTimeout trait is impl: could spawn thread and use park with timeout;
+    // would give zero latency for scheduler but not for other async sources
+    // select? - make it selectable; would need to be somehow generic so can be used with other things like IO,
+    // channels etc. - only via FD and OS specific stuff (epoll) or with thread park (what select!
+    // macro does in very complicated way) - impl is out of scope for this unless it can be a
+    // client easily; also select! is unsable and will be so
+
     pub fn wait(&mut self) -> Result<Vec<Token>, WaitError<Token>> where TS: Wait {
         match self.next() {
             Option::Some(schedule) => match schedule {
