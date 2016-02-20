@@ -489,6 +489,28 @@ mod test {
         }
     }
 
+    // Used to test minimum requred traits on token type
+    #[derive(Clone)]
+    #[allow(dead_code)]
+    enum OpaqueToken {
+        Zero,
+        One,
+        Two,
+    }
+
+    impl OpaqueToken {
+        fn expect(&self, t: OpaqueToken) {
+            match (self, t) {
+                (&Zero, Zero) => (),
+                (&One, One) => (),
+                (&Two, Two) => (),
+                (_, _) => panic!("OpaqueToken mismatch")
+            }
+        }
+    }
+
+    use self::OpaqueToken::{Zero, One, Two};
+
     #[test]
     fn task_next_schedule() {
         let now = Duration::seconds(0);
@@ -570,6 +592,20 @@ mod test {
     }
 
     #[test]
+    fn scheduler_after_opaque_token() {
+        let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSource::new());
+
+        scheduler.after(Duration::seconds(0), Zero);
+        match scheduler.next().unwrap() {
+            Schedule::Current(tokens) => {
+                assert_eq!(tokens.len(), 1);
+                tokens.first().unwrap().expect(Zero)
+            }
+            _ => panic!("expected Schedule::Current")
+        }
+    }
+
+    #[test]
     fn scheduler_every() {
         let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSource::new());
 
@@ -639,6 +675,23 @@ mod test {
     }
 
     #[test]
+    fn scheduler_wait_opeque_token() {
+        let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSourceWait::new());
+
+        scheduler.after(Duration::seconds(0), Zero);
+        scheduler.after(Duration::seconds(1), One);
+        scheduler.after(Duration::seconds(2), Two);
+
+        match scheduler.wait() {
+            Ok(tokens) => {
+                assert_eq!(tokens.len(), 1);
+                tokens.first().unwrap().expect(Zero)
+            }
+            _ => panic!("expected Ok")
+        }
+    }
+
+    #[test]
     fn scheduler_wait_with_overrun() {
         let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSourceWait::new());
 
@@ -661,6 +714,27 @@ mod test {
 
         assert_eq!(scheduler.wait_timeout(Duration::seconds(2)), Ok(vec![0]));
         assert_eq!(scheduler.wait_timeout(Duration::milliseconds(500)), Err(WaitTimeoutError::Timeout));
+    }
+
+    #[test]
+    fn scheduler_wait_timeout_opeque_token() {
+        let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSourceWait::new());
+
+        scheduler.after(Duration::seconds(0), Zero);
+        scheduler.after(Duration::seconds(1), One);
+        scheduler.after(Duration::seconds(2), Two);
+
+        match scheduler.wait_timeout(Duration::seconds(2)) {
+            Ok(tokens) => {
+                assert_eq!(tokens.len(), 1);
+                tokens.first().unwrap().expect(Zero)
+            }
+            _ => panic!("expected Ok")
+        }
+        match scheduler.wait_timeout(Duration::milliseconds(500)) {
+            Err(WaitTimeoutError::Timeout) => (),
+            _ => panic!("expected Err(WaitTimeoutError::Timeout)")
+        }
     }
 
     #[test]
