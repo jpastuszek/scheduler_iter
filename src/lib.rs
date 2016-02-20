@@ -306,6 +306,60 @@ impl<Token> Error for WaitError<Token> where Token: fmt::Debug + Any {
     }
 }
 
+pub enum WaitTimeoutError<Token> {
+    Empty,
+    Timeout,
+    Overrun(Vec<Token>)
+}
+
+impl<Token> PartialEq for WaitTimeoutError<Token> where Token: PartialEq<Token> {
+    fn eq(&self, other: &Self) -> bool {
+        match self {
+            &WaitTimeoutError::Empty => if let &WaitTimeoutError::Empty = other {
+                true
+            } else {
+                false
+            },
+            &WaitTimeoutError::Timeout => if let &WaitTimeoutError::Timeout = other {
+                true
+            } else {
+                false
+            },
+            &WaitTimeoutError::Overrun(ref tokens) => if let &WaitTimeoutError::Overrun(ref other_tokens) = other {
+                tokens == other_tokens
+            } else {
+                false
+            }
+        }
+    }
+}
+
+impl<Token> fmt::Debug for WaitTimeoutError<Token> where Token: fmt::Debug {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            &WaitTimeoutError::Empty => write!(f, "WaitError::Empty"),
+            &WaitTimeoutError::Timeout => write!(f, "WaitError::Timeout"),
+            &WaitTimeoutError::Overrun(ref tokens) => write!(f, "WaitError::Overrun({:?})", tokens)
+        }
+    }
+}
+
+impl<Token> fmt::Display for WaitTimeoutError<Token> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            &WaitTimeoutError::Empty => write!(f, "scheduler is empty"),
+            &WaitTimeoutError::Timeout => write!(f, "timedout while waiting for tokens"),
+            &WaitTimeoutError::Overrun(ref tokens) => write!(f, "scheduler overrun {} tokens", tokens.len())
+        }
+    }
+}
+
+impl<Token> Error for WaitTimeoutError<Token> where Token: fmt::Debug + Any {
+    fn description(&self) -> &str {
+        "problem while waiting for next schedule with timeout"
+    }
+}
+
 impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
     //TODO: some way to integrate it with other async events in the program in a way that:
     // * there is no need to loop over with short sleep - consume CPU
@@ -336,6 +390,28 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
                 }
             },
             None => Err(WaitError::Empty)
+        }
+    }
+
+    pub fn wait_timeout(&mut self, timeout: Duration) -> Result<Vec<Token>, WaitTimeoutError<Token>> where TS: Wait {
+        match self.next() {
+            Some(schedule) => match schedule {
+                Schedule::NextIn(duration) => {
+                    if duration > timeout {
+                        self.time_source.wait(timeout);
+                        return Err(WaitTimeoutError::Timeout);
+                    }
+                    self.time_source.wait(duration);
+                    self.wait_timeout(Duration::zero())
+                },
+                Schedule::Overrun(overrun_tokens) => {
+                    Err(WaitTimeoutError::Overrun(overrun_tokens))
+                },
+                Schedule::Current(tokens) => {
+                    Ok(tokens)
+                }
+            },
+            None => Err(WaitTimeoutError::Empty)
         }
     }
 
@@ -577,6 +653,18 @@ mod test {
         scheduler.fast_forward(Duration::seconds(2));
         assert_eq!(scheduler.wait(), Err(WaitError::Overrun(vec![0, 1])));
         assert_eq!(scheduler.wait(), Ok(vec![2]));
+    }
+
+    #[test]
+    fn scheduler_wait_timeout() {
+        let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSourceWait::new());
+
+        scheduler.after(Duration::seconds(0), 0);
+        scheduler.after(Duration::seconds(1), 1);
+        scheduler.after(Duration::seconds(2), 2);
+
+        assert_eq!(scheduler.wait_timeout(Duration::seconds(2)), Ok(vec![0]));
+        assert_eq!(scheduler.wait_timeout(Duration::milliseconds(500)), Err(WaitTimeoutError::Timeout));
     }
 
     #[test]
