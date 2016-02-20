@@ -322,7 +322,7 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource + Wait, Token: Clone {
 
     pub fn wait(&mut self) -> Result<Vec<Token>, WaitError<Token>> where TS: Wait {
         match self.next() {
-            Option::Some(schedule) => match schedule {
+            Some(schedule) => match schedule {
                 Schedule::NextIn(duration) => {
                     //TODO: can we protect against wait() that does not move us forward?
                     self.time_source.wait(duration);
@@ -335,13 +335,13 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource + Wait, Token: Clone {
                     Ok(tokens)
                 }
             },
-            Option::None => Err(WaitError::Empty)
+            None => Err(WaitError::Empty)
         }
     }
 
     pub fn try(&mut self) -> Option<Result<Vec<Token>, WaitError<Token>>> {
         match self.next() {
-            Option::Some(schedule) => match schedule {
+            Some(schedule) => match schedule {
                 Schedule::NextIn(_) => {
                     None
                 },
@@ -352,7 +352,7 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource + Wait, Token: Clone {
                     Some(Ok(tokens))
                 }
             },
-            Option::None => Some(Err(WaitError::Empty))
+            None => Some(Err(WaitError::Empty))
         }
     }
 }
@@ -451,8 +451,8 @@ mod test {
     #[test]
     fn scheduler_empty() {
         let mut scheduler: Scheduler<(), _> = Scheduler::new(Duration::seconds(1));
-        assert_eq!(scheduler.next(), Option::None);
-        assert_eq!(scheduler.next(), Option::None);
+        assert_eq!(scheduler.next(), None);
+        assert_eq!(scheduler.next(), None);
     }
 
     #[test]
@@ -460,17 +460,17 @@ mod test {
         let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSource::new());
 
         scheduler.after(Duration::seconds(0), 0);
-        assert_eq!(scheduler.next(), Option::Some(Schedule::Current(vec![0])));
+        assert_eq!(scheduler.next(), Some(Schedule::Current(vec![0])));
 
         scheduler.after(Duration::seconds(1), 1);
-        assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::seconds(1))));
-        assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::seconds(1))));
+        assert_eq!(scheduler.next(), Some(Schedule::NextIn(Duration::seconds(1))));
+        assert_eq!(scheduler.next(), Some(Schedule::NextIn(Duration::seconds(1))));
 
         scheduler.fast_forward(Duration::milliseconds(100));
-        assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::milliseconds(900))));
+        assert_eq!(scheduler.next(), Some(Schedule::NextIn(Duration::milliseconds(900))));
         scheduler.fast_forward(Duration::milliseconds(900));
-        assert_eq!(scheduler.next(), Option::Some(Schedule::Current(vec![1])));
-        assert_eq!(scheduler.next(), Option::None);
+        assert_eq!(scheduler.next(), Some(Schedule::Current(vec![1])));
+        assert_eq!(scheduler.next(), None);
     }
 
     #[test]
@@ -478,20 +478,20 @@ mod test {
         let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSource::new());
 
         scheduler.every(Duration::seconds(1), 1);
-        assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::seconds(1))));
-        assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::seconds(1))));
+        assert_eq!(scheduler.next(), Some(Schedule::NextIn(Duration::seconds(1))));
+        assert_eq!(scheduler.next(), Some(Schedule::NextIn(Duration::seconds(1))));
 
         scheduler.fast_forward(Duration::milliseconds(100));
-        assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::milliseconds(900))));
+        assert_eq!(scheduler.next(), Some(Schedule::NextIn(Duration::milliseconds(900))));
         scheduler.fast_forward(Duration::milliseconds(900));
-        assert_eq!(scheduler.next(), Option::Some(Schedule::Current(vec![1])));
-        assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::seconds(1))));
+        assert_eq!(scheduler.next(), Some(Schedule::Current(vec![1])));
+        assert_eq!(scheduler.next(), Some(Schedule::NextIn(Duration::seconds(1))));
 
         scheduler.fast_forward(Duration::milliseconds(600));
-        assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::milliseconds(400))));
+        assert_eq!(scheduler.next(), Some(Schedule::NextIn(Duration::milliseconds(400))));
         scheduler.fast_forward(Duration::milliseconds(500));
-        assert_eq!(scheduler.next(), Option::Some(Schedule::Current(vec![1])));
-        assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::milliseconds(900))));
+        assert_eq!(scheduler.next(), Some(Schedule::Current(vec![1])));
+        assert_eq!(scheduler.next(), Some(Schedule::NextIn(Duration::milliseconds(900))));
     }
 
     #[test]
@@ -500,8 +500,8 @@ mod test {
 
         scheduler.every(Duration::seconds(1), 1);
         scheduler.fast_forward(Duration::seconds(4));
-        assert_eq!(scheduler.next(), Option::Some(Schedule::Overrun(vec![1, 1, 1])));
-        assert_eq!(scheduler.next(), Option::Some(Schedule::Current(vec![1])));
+        assert_eq!(scheduler.next(), Some(Schedule::Overrun(vec![1, 1, 1])));
+        assert_eq!(scheduler.next(), Some(Schedule::Current(vec![1])));
     }
 
     #[test]
@@ -509,24 +509,24 @@ mod test {
         let mut scheduler = Scheduler::with_time_source(Duration::nanoseconds(1), MockTimeSource::new());
 
         scheduler.after(Duration::nanoseconds(1), 1);
-        assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::nanoseconds(1))));
+        assert_eq!(scheduler.next(), Some(Schedule::NextIn(Duration::nanoseconds(1))));
 
         scheduler.fast_forward(Duration::nanoseconds(1));
-        assert_eq!(scheduler.next(), Option::Some(Schedule::Current(vec![1])));
+        assert_eq!(scheduler.next(), Some(Schedule::Current(vec![1])));
 
         scheduler.after(Duration::weeks(15250), 2);
-        assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::weeks(15250))));
+        assert_eq!(scheduler.next(), Some(Schedule::NextIn(Duration::weeks(15250))));
 
         scheduler.fast_forward(Duration::weeks(15250));
-        assert_eq!(scheduler.next(), Option::Some(Schedule::Current(vec![2])));
+        assert_eq!(scheduler.next(), Some(Schedule::Current(vec![2])));
 
         let mut scheduler = Scheduler::with_time_source(Duration::weeks(15250) / 2, MockTimeSource::new());
 
         scheduler.after(Duration::weeks(15250) / 2, 1);
-        assert_eq!(scheduler.next(), Option::Some(Schedule::NextIn(Duration::weeks(15250) / 2)));
+        assert_eq!(scheduler.next(), Some(Schedule::NextIn(Duration::weeks(15250) / 2)));
 
         scheduler.fast_forward(Duration::weeks(15250) / 2);
-        assert_eq!(scheduler.next(), Option::Some(Schedule::Current(vec![1])));
+        assert_eq!(scheduler.next(), Some(Schedule::Current(vec![1])));
     }
 
     #[test]
@@ -537,9 +537,9 @@ mod test {
         scheduler.after(Duration::seconds(1), 1);
         scheduler.after(Duration::seconds(2), 2);
 
-        assert_eq!(scheduler.wait(), Result::Ok(vec![0]));
-        assert_eq!(scheduler.wait(), Result::Ok(vec![1]));
-        assert_eq!(scheduler.wait(), Result::Ok(vec![2]));
+        assert_eq!(scheduler.wait(), Ok(vec![0]));
+        assert_eq!(scheduler.wait(), Ok(vec![1]));
+        assert_eq!(scheduler.wait(), Ok(vec![2]));
     }
 
     #[test]
@@ -551,8 +551,8 @@ mod test {
         scheduler.after(Duration::seconds(2), 2);
 
         scheduler.fast_forward(Duration::seconds(2));
-        assert_eq!(scheduler.wait(), Result::Err(WaitError::Overrun(vec![0, 1])));
-        assert_eq!(scheduler.wait(), Result::Ok(vec![2]));
+        assert_eq!(scheduler.wait(), Err(WaitError::Overrun(vec![0, 1])));
+        assert_eq!(scheduler.wait(), Ok(vec![2]));
     }
 
     #[test]
@@ -563,9 +563,9 @@ mod test {
         scheduler.after(Duration::milliseconds(100), 1);
         scheduler.after(Duration::milliseconds(200), 2);
 
-        assert_eq!(scheduler.wait(), Result::Ok(vec![0]));
-        assert_eq!(scheduler.wait(), Result::Ok(vec![1]));
-        assert_eq!(scheduler.wait(), Result::Ok(vec![2]));
+        assert_eq!(scheduler.wait(), Ok(vec![0]));
+        assert_eq!(scheduler.wait(), Ok(vec![1]));
+        assert_eq!(scheduler.wait(), Ok(vec![2]));
     }
 
     #[test]
@@ -580,8 +580,8 @@ mod test {
         scheduler.cancel(&1);
         scheduler.cancel(&2);
 
-        assert_eq!(scheduler.wait(), Result::Ok(vec![0]));
-        assert_eq!(scheduler.wait(), Result::Ok(vec![4]));
+        assert_eq!(scheduler.wait(), Ok(vec![0]));
+        assert_eq!(scheduler.wait(), Ok(vec![4]));
     }
 
     #[test]
@@ -632,9 +632,9 @@ mod test {
         scheduler.cancel(&1);
         scheduler.cancel(&4);
 
-        assert_eq!(scheduler.wait(), Result::Ok(vec![0]));
-        assert_eq!(scheduler.wait(), Result::Ok(vec![2, 3]));
-        assert_eq!(scheduler.wait(), Result::Ok(vec![5]));
+        assert_eq!(scheduler.wait(), Ok(vec![0]));
+        assert_eq!(scheduler.wait(), Ok(vec![2, 3]));
+        assert_eq!(scheduler.wait(), Ok(vec![5]));
     }
 }
 
