@@ -311,7 +311,7 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource + Wait, Token: Clone {
     // * there is no need to loop over with short sleep - consume CPU
     // * there is no latency - at the moment token is abailable it gets consumed by clint no mater
     // if he waits for other events like channels or IO
-    // next_try() - can do loop with sleep... may be part of bigger sollution
+    // try() - can do loop with sleep... may be part of bigger sollution
     // wait() - just blocking
     // wait_timeout() - if WaitTimeout trait is impl: could spawn thread and use park with timeout;
     // would give zero latency for scheduler but not for other async sources
@@ -336,6 +336,23 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource + Wait, Token: Clone {
                 }
             },
             Option::None => Err(WaitError::Empty)
+        }
+    }
+
+    pub fn try(&mut self) -> Option<Result<Vec<Token>, WaitError<Token>>> {
+        match self.next() {
+            Option::Some(schedule) => match schedule {
+                Schedule::NextIn(_) => {
+                    None
+                },
+                Schedule::Overrun(overrun_tokens) => {
+                    Some(Err(WaitError::Overrun(overrun_tokens)))
+                },
+                Schedule::Current(tokens) => {
+                    Some(Ok(tokens))
+                }
+            },
+            Option::None => Some(Err(WaitError::Empty))
         }
     }
 }
@@ -565,6 +582,40 @@ mod test {
 
         assert_eq!(scheduler.wait(), Result::Ok(vec![0]));
         assert_eq!(scheduler.wait(), Result::Ok(vec![4]));
+    }
+
+    #[test]
+    fn scheduler_try() {
+        let mut scheduler = Scheduler::with_time_source(Duration::nanoseconds(1), MockTimeSource::new());
+
+        scheduler.after(Duration::seconds(0), 0);
+        scheduler.after(Duration::seconds(1), 1);
+        scheduler.after(Duration::seconds(2), 2);
+
+        assert_eq!(scheduler.try(), Some(Ok(vec![0])));
+        assert_eq!(scheduler.try(), None);
+        assert_eq!(scheduler.try(), None);
+
+        scheduler.fast_forward(Duration::seconds(1));
+        assert_eq!(scheduler.try(), Some(Ok(vec![1])));
+        assert_eq!(scheduler.try(), None);
+
+        scheduler.fast_forward(Duration::seconds(1));
+        assert_eq!(scheduler.try(), Some(Ok(vec![2])));
+        assert_eq!(scheduler.try(), Some(Err(WaitError::Empty)));
+    }
+
+    #[test]
+    fn scheduler_try_with_overrun() {
+        let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSource::new());
+
+        scheduler.after(Duration::seconds(0), 0);
+        scheduler.after(Duration::seconds(1), 1);
+        scheduler.after(Duration::seconds(2), 2);
+
+        scheduler.fast_forward(Duration::seconds(2));
+        assert_eq!(scheduler.try(), Some(Err(WaitError::Overrun(vec![0, 1]))));
+        assert_eq!(scheduler.try(), Some(Ok(vec![2])));
     }
 
     #[test]
