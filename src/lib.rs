@@ -365,20 +365,16 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
     // * there is no need to loop over with short sleep - consume CPU
     // * there is no latency - at the moment token is abailable it gets consumed by clint no mater
     // if he waits for other events like channels or IO
-    // try() - can do loop with sleep... may be part of bigger sollution
-    // wait() - just blocking
-    // wait_timeout() - if WaitTimeout trait is impl: could spawn thread and use park with timeout;
-    // would give zero latency for scheduler but not for other async sources
     // select? - make it selectable; would need to be somehow generic so can be used with other things like IO,
     // channels etc. - only via FD and OS specific stuff (epoll) or with thread park (what select!
     // macro does in very complicated way) - impl is out of scope for this unless it can be a
     // client easily; also select! is unsable and will be so
+    // Note: if wait time_source wait does not progress time forward we will run out of stack!
 
     pub fn wait(&mut self) -> Result<Vec<Token>, WaitError<Token>> where TS: Wait {
         match self.next() {
             Some(schedule) => match schedule {
                 Schedule::NextIn(duration) => {
-                    //TODO: can we protect against wait() that does not move us forward?
                     self.time_source.wait(duration);
                     self.wait()
                 },
