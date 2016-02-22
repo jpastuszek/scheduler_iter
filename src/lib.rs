@@ -86,13 +86,13 @@ impl TimeSource for SteadyTimeSource {
     }
 }
 
-type TimePoint = u64;
+type PointInTime = u64;
 
 enum SchedulerAction {
     None,
     Wait(Duration),
-    Skip(Vec<TimePoint>),
-    Yield(TimePoint)
+    Skip(Vec<PointInTime>),
+    Yield(PointInTime)
 }
 
 pub enum Schedule<Token> {
@@ -103,23 +103,94 @@ pub enum Schedule<Token> {
 
 impl<Token> PartialEq for Schedule<Token> where Token: PartialEq<Token> {
     fn eq(&self, other: &Self) -> bool {
-        match self {
-            &Schedule::NextIn(ref duration) => if let &Schedule::NextIn(ref other_duration) = other {
-                duration == other_duration
-            } else {
-                false
-            },
-            &Schedule::Overrun(ref tokens) => if let &Schedule::Overrun(ref other_tokens) = other {
-                tokens == other_tokens
-            } else {
-                false
-            },
-            &Schedule::Current(ref tokens) => if let &Schedule::Current(ref other_tokens) = other {
-                tokens == other_tokens
-            } else {
-                false
-            }
+        match (self, other) {
+            (&Schedule::NextIn(ref duration), &Schedule::NextIn(ref other_duration)) => duration == other_duration,
+            (&Schedule::Overrun(ref tokens), &Schedule::Overrun(ref other_tokens)) => tokens == other_tokens,
+            (&Schedule::Current(ref tokens), &Schedule::Current(ref other_tokens)) => tokens == other_tokens,
+            _ => false
         }
+    }
+}
+
+pub enum WaitError<Token> {
+    Empty,
+    Overrun(Vec<Token>)
+}
+
+impl<Token> PartialEq for WaitError<Token> where Token: PartialEq<Token> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (&WaitError::Empty, &WaitError::Empty) => true,
+            (&WaitError::Overrun(ref tokens), &WaitError::Overrun(ref other_tokens)) => tokens == other_tokens,
+            _ => false
+        }
+    }
+}
+
+impl<Token> fmt::Debug for WaitError<Token> where Token: fmt::Debug {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            &WaitError::Empty => write!(f, "WaitError::Empty"),
+            &WaitError::Overrun(ref tokens) => write!(f, "WaitError::Overrun({:?})", tokens)
+        }
+    }
+}
+
+impl<Token> fmt::Display for WaitError<Token> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            &WaitError::Empty => write!(f, "scheduler is empty"),
+            &WaitError::Overrun(ref tokens) => write!(f, "scheduler overrun {} tokens", tokens.len())
+        }
+    }
+}
+
+impl<Token> Error for WaitError<Token> where Token: fmt::Debug + Any {
+    fn description(&self) -> &str {
+        "problem while waiting for next schedule"
+    }
+}
+
+pub enum WaitTimeoutError<Token> {
+    Empty,
+    Timeout,
+    Overrun(Vec<Token>)
+}
+
+impl<Token> PartialEq for WaitTimeoutError<Token> where Token: PartialEq<Token> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (&WaitTimeoutError::Empty, &WaitTimeoutError::Empty) => true,
+            (&WaitTimeoutError::Timeout, &WaitTimeoutError::Timeout) => true,
+            (&WaitTimeoutError::Overrun(ref tokens), &WaitTimeoutError::Overrun(ref other_tokens)) => tokens == other_tokens,
+            _ => false
+        }
+    }
+}
+
+impl<Token> fmt::Debug for WaitTimeoutError<Token> where Token: fmt::Debug {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            &WaitTimeoutError::Empty => write!(f, "WaitError::Empty"),
+            &WaitTimeoutError::Timeout => write!(f, "WaitError::Timeout"),
+            &WaitTimeoutError::Overrun(ref tokens) => write!(f, "WaitError::Overrun({:?})", tokens)
+        }
+    }
+}
+
+impl<Token> fmt::Display for WaitTimeoutError<Token> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            &WaitTimeoutError::Empty => write!(f, "scheduler is empty"),
+            &WaitTimeoutError::Timeout => write!(f, "timedout while waiting for tokens"),
+            &WaitTimeoutError::Overrun(ref tokens) => write!(f, "scheduler overrun {} tokens", tokens.len())
+        }
+    }
+}
+
+impl<Token> Error for WaitTimeoutError<Token> where Token: fmt::Debug + Any {
+    fn description(&self) -> &str {
+        "problem while waiting for next schedule with timeout"
     }
 }
 
@@ -135,7 +206,7 @@ impl<Token> fmt::Debug for Schedule<Token> where Token: fmt::Debug {
 
 pub struct Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
     time_point_interval: Duration,
-    tasks: BTreeMap<TimePoint, Vec<Task<Token>>>,
+    tasks: BTreeMap<PointInTime, Vec<Task<Token>>>,
     time_source: TS
 }
 
@@ -223,126 +294,6 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
         }
     }
 
-    fn consume(&mut self, time_points: Vec<TimePoint>) -> Vec<Token> {
-        let mut tasks: Vec<Task<Token>> = time_points.iter().flat_map(|time_point|
-                self.tasks.remove(&time_point).unwrap()
-            ).collect();
-
-        tasks.sort_by(|a, b| a.run_offset.cmp(&b.run_offset));
-        let tokens = tasks.iter().map(|ref task| task.token.clone()).collect();
-
-        for task in tasks {
-            match task.bond {
-                TaskBond::Perpetual => self.schedule(task.next()),
-                TaskBond::OneOff => ()
-            };
-        }
-        tokens
-    }
-
-    fn to_time_point(&self, duration: Duration) -> TimePoint {
-        // nanoseconds gives 15250 weeks or 299 years of duration max... should do?
-        let interval = self.time_point_interval.num_nanoseconds().expect("interval too large");
-        let duration = duration.num_nanoseconds().expect("duration too large");
-        assert!(duration >= 0);
-
-        (duration / interval) as TimePoint
-    }
-
-    fn to_duration(&self, time_point: TimePoint) -> Duration {
-        Duration::nanoseconds(self.time_point_interval.num_nanoseconds().expect("time point interval too large") * time_point as i64)
-    }
-}
-
-impl<Token, TS> FastForward for Scheduler<Token, TS> where TS: TimeSource + FastForward, Token: Clone {
-    fn fast_forward(&mut self, duration: Duration) {
-        self.time_source.fast_forward(duration);
-    }
-}
-
-pub enum WaitError<Token> {
-    Empty,
-    Overrun(Vec<Token>)
-}
-
-impl<Token> PartialEq for WaitError<Token> where Token: PartialEq<Token> {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (&WaitError::Empty, &WaitError::Empty) => true,
-            (&WaitError::Overrun(ref tokens), &WaitError::Overrun(ref other_tokens)) => tokens == other_tokens,
-            _ => false
-        }
-    }
-}
-
-impl<Token> fmt::Debug for WaitError<Token> where Token: fmt::Debug {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &WaitError::Empty => write!(f, "WaitError::Empty"),
-            &WaitError::Overrun(ref tokens) => write!(f, "WaitError::Overrun({:?})", tokens)
-        }
-    }
-}
-
-impl<Token> fmt::Display for WaitError<Token> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &WaitError::Empty => write!(f, "scheduler is empty"),
-            &WaitError::Overrun(ref tokens) => write!(f, "scheduler overrun {} tokens", tokens.len())
-        }
-    }
-}
-
-impl<Token> Error for WaitError<Token> where Token: fmt::Debug + Any {
-    fn description(&self) -> &str {
-        "problem while waiting for next schedule"
-    }
-}
-
-pub enum WaitTimeoutError<Token> {
-    Empty,
-    Timeout,
-    Overrun(Vec<Token>)
-}
-
-impl<Token> PartialEq for WaitTimeoutError<Token> where Token: PartialEq<Token> {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (&WaitTimeoutError::Empty, &WaitTimeoutError::Empty) => true,
-            (&WaitTimeoutError::Timeout, &WaitTimeoutError::Timeout) => true,
-            (&WaitTimeoutError::Overrun(ref tokens), &WaitTimeoutError::Overrun(ref other_tokens)) => tokens == other_tokens,
-            _ => false
-        }
-    }
-}
-
-impl<Token> fmt::Debug for WaitTimeoutError<Token> where Token: fmt::Debug {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &WaitTimeoutError::Empty => write!(f, "WaitError::Empty"),
-            &WaitTimeoutError::Timeout => write!(f, "WaitError::Timeout"),
-            &WaitTimeoutError::Overrun(ref tokens) => write!(f, "WaitError::Overrun({:?})", tokens)
-        }
-    }
-}
-
-impl<Token> fmt::Display for WaitTimeoutError<Token> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &WaitTimeoutError::Empty => write!(f, "scheduler is empty"),
-            &WaitTimeoutError::Timeout => write!(f, "timedout while waiting for tokens"),
-            &WaitTimeoutError::Overrun(ref tokens) => write!(f, "scheduler overrun {} tokens", tokens.len())
-        }
-    }
-}
-
-impl<Token> Error for WaitTimeoutError<Token> where Token: fmt::Debug + Any {
-    fn description(&self) -> &str {
-        "problem while waiting for next schedule with timeout"
-    }
-}
-
-impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
     //TODO: some way to integrate it with other async events in the program in a way that:
     // * there is no need to loop over with short sleep - consume CPU
     // * there is no latency - at the moment token is abailable it gets consumed by clint no mater
@@ -408,6 +359,42 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
             },
             None => Some(Err(WaitError::Empty))
         }
+    }
+
+    fn consume(&mut self, time_points: Vec<PointInTime>) -> Vec<Token> {
+        let mut tasks: Vec<Task<Token>> = time_points.iter().flat_map(|time_point|
+                self.tasks.remove(&time_point).unwrap()
+            ).collect();
+
+        tasks.sort_by(|a, b| a.run_offset.cmp(&b.run_offset));
+        let tokens = tasks.iter().map(|ref task| task.token.clone()).collect();
+
+        for task in tasks {
+            match task.bond {
+                TaskBond::Perpetual => self.schedule(task.next()),
+                TaskBond::OneOff => ()
+            };
+        }
+        tokens
+    }
+
+    fn to_time_point(&self, duration: Duration) -> PointInTime {
+        // nanoseconds gives 15250 weeks or 299 years of duration max... should do?
+        let interval = self.time_point_interval.num_nanoseconds().expect("interval too large");
+        let duration = duration.num_nanoseconds().expect("duration too large");
+        assert!(duration >= 0);
+
+        (duration / interval) as PointInTime
+    }
+
+    fn to_duration(&self, time_point: PointInTime) -> Duration {
+        Duration::nanoseconds(self.time_point_interval.num_nanoseconds().expect("time point interval too large") * time_point as i64)
+    }
+}
+
+impl<Token, TS> FastForward for Scheduler<Token, TS> where TS: TimeSource + FastForward, Token: Clone {
+    fn fast_forward(&mut self, duration: Duration) {
+        self.time_source.fast_forward(duration);
     }
 }
 
@@ -801,4 +788,3 @@ mod test {
         assert_eq!(scheduler.wait(), Ok(vec![5]));
     }
 }
-
