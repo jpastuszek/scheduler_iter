@@ -93,15 +93,26 @@ pub trait Abort: Send {
     fn abort(&self);
 }
 
-// TODO: Error trait
 #[derive(Debug, PartialEq)]
-pub enum AbortWaitError {
-    Aborted
+pub struct WaitAbortedError;
+
+impl Error for WaitAbortedError {
+    fn description(&self) -> &str {
+        "wait operation aborted from another thread"
+    }
 }
 
-pub trait AbortableWait<AbortHandle> where AbortHandle: Abort {
-    fn abort_handle(&self) -> AbortHandle;
-    fn abortable_wait(&mut self, duration: Duration) -> Result<(), AbortWaitError>;
+impl fmt::Display for WaitAbortedError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.description())
+    }
+}
+
+pub trait AbortableWait {
+    type AbortHandle: Abort;
+
+    fn abort_handle(&self) -> Self::AbortHandle;
+    fn abortable_wait(&mut self, duration: Duration) -> Result<(), WaitAbortedError>;
 }
 
 pub struct SteadyTimeSourceAbortHandle {
@@ -120,21 +131,24 @@ impl Abort for SteadyTimeSourceAbortHandle {
     }
 }
 
-impl AbortableWait<SteadyTimeSourceAbortHandle> for SteadyTimeSource {
-    fn abort_handle(&self) -> SteadyTimeSourceAbortHandle {
+impl AbortableWait for SteadyTimeSource {
+    type AbortHandle = SteadyTimeSourceAbortHandle;
+
+    fn abort_handle(&self) -> Self::AbortHandle {
         SteadyTimeSourceAbortHandle {
             waiter_thread: thread::current(),
             abort: self.abort.clone()
         }
     }
 
-    fn abortable_wait(&mut self, duration: Duration) -> Result<(), AbortWaitError> {
+    fn abortable_wait(&mut self, duration: Duration) -> Result<(), WaitAbortedError> {
+        //TODO: this can spuriously return
         thread::park_timeout(std::time::Duration::new(
             duration.num_seconds() as u64,
             (duration.num_nanoseconds().expect("sleep duration too large") - duration.num_seconds() * 1_000_000_000) as u32
         ));
         if *self.abort.lock().unwrap() {
-            Err(AbortWaitError::Aborted)
+            Err(WaitAbortedError)
         } else {
             Ok(())
         }
@@ -851,12 +865,11 @@ mod test {
         let mut sts = SteadyTimeSource::new();
 
         let abort_handle = sts.abort_handle();
-
         spawn(move || {
             abort_handle.abort();
         });
 
-        assert_eq!(sts.abortable_wait(Duration::seconds(2)), Err(AbortWaitError::Aborted));
+        assert_eq!(sts.abortable_wait(Duration::seconds(2)), Err(WaitAbortedError));
     }
 
     #[test]
