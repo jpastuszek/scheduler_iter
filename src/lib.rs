@@ -7,7 +7,8 @@ use std::fmt;
 use std::error::Error;
 use std::any::Any;
 use std::cmp::PartialEq;
-use std::thread::sleep;
+use std::thread::{self, Thread, sleep};
+use std::sync::atomic::{self, AtomicBool};
 
 #[derive(Clone)]
 struct Task<Token> where Token: Clone {
@@ -60,13 +61,15 @@ pub trait Wait {
 }
 
 pub struct SteadyTimeSource {
-    offset: SteadyTime
+    offset: SteadyTime,
+    abort: AtomicBool
 }
 
 impl SteadyTimeSource {
     fn new() -> SteadyTimeSource {
         SteadyTimeSource {
-            offset: SteadyTime::now()
+            offset: SteadyTime::now(),
+            abort: AtomicBool::new(false)
         }
     }
 }
@@ -85,6 +88,55 @@ impl TimeSource for SteadyTimeSource {
         SteadyTime::now() - self.offset
     }
 }
+
+pub trait Abort: Send {
+    fn abort(&self);
+}
+
+// TODO: Error trait
+#[derive(Debug, PartialEq)]
+pub enum AbortWaitError {
+    Aborted
+}
+
+pub trait AbortableWait<'a, AbortHandle> where AbortHandle: Abort + 'a {
+    fn abort_handle(&'a self) -> AbortHandle;
+    fn abortable_wait(&mut self, duration: Duration) -> Result<(), AbortWaitError>;
+}
+
+pub struct SteadyTimeSourceAbortHandle<'a> {
+    waiter_thread: Thread,
+    abort: &'a AtomicBool
+}
+
+impl<'a> Abort for SteadyTimeSourceAbortHandle<'a> {
+    fn abort(&self) {
+        self.abort.store(true, atomic::Ordering::AcqRel);
+        self.waiter_thread.unpark();
+    }
+}
+
+impl<'a> AbortableWait<'a, SteadyTimeSourceAbortHandle<'a>> for SteadyTimeSource {
+    fn abort_handle(&'a self) -> SteadyTimeSourceAbortHandle<'a> {
+        SteadyTimeSourceAbortHandle {
+            waiter_thread: thread::current(),
+            abort: &self.abort
+        }
+    }
+
+    fn abortable_wait(&mut self, duration: Duration) -> Result<(), AbortWaitError> {
+        thread::park_timeout(std::time::Duration::new(
+            duration.num_seconds() as u64,
+            (duration.num_nanoseconds().expect("sleep duration too large") - duration.num_seconds() * 1_000_000_000) as u32
+        ));
+        if self.abort.load(atomic::Ordering::AcqRel) {
+            Err(AbortWaitError::Aborted)
+        } else {
+            Ok(())
+        }
+    }
+}
+
 
 type PointInTime = u64;
 
@@ -786,5 +838,30 @@ mod test {
         assert_eq!(scheduler.wait(), Ok(vec![0]));
         assert_eq!(scheduler.wait(), Ok(vec![2, 3]));
         assert_eq!(scheduler.wait(), Ok(vec![5]));
+    }
+
+    #[test]
+    fn steady_time_source_abortable_wait_early_abort() {
+        use std::thread::spawn;
+
+        let mut sts = SteadyTimeSource::new();
+
+        let abort_handle = sts.abort_handle();
+
+        //spawn(move || {
+         //   abort_handle.abort();
+        //});
+
+        abort_handle.abort();
+        assert_eq!(sts.abortable_wait(Duration::seconds(2)), Err(AbortWaitError::Aborted));
+    }
+
+    #[test]
+    fn steady_time_source_abortable_wait_no_abort() {
+        let mut sts = SteadyTimeSource::new();
+
+        let _ = sts.abort_handle();
+
+        assert_eq!(sts.abortable_wait(Duration::seconds(2)), Ok(()));
     }
 }
