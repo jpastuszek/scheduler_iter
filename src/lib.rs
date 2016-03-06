@@ -1,14 +1,16 @@
 extern crate time;
 
-use time::{SteadyTime, Duration};
+mod steady_time_source;
+mod abortable_wait;
+
 use std::collections::BTreeMap;
 use std::cmp::Ordering;
 use std::fmt;
 use std::error::Error;
 use std::any::Any;
 use std::cmp::PartialEq;
-use std::thread::{self, Thread, sleep};
-use std::sync::{Mutex, Arc};
+use time::Duration;
+use steady_time_source::SteadyTimeSource;
 
 #[derive(Clone)]
 struct Task<Token> where Token: Clone {
@@ -60,35 +62,6 @@ pub trait Wait {
     fn wait(&mut self, duration: Duration);
 }
 
-pub struct SteadyTimeSource {
-    offset: SteadyTime,
-    abort: Arc<Mutex<bool>>
-}
-
-impl SteadyTimeSource {
-    fn new() -> SteadyTimeSource {
-        SteadyTimeSource {
-            offset: SteadyTime::now(),
-            abort: Arc::new(Mutex::new(false))
-        }
-    }
-}
-
-impl Wait for SteadyTimeSource {
-    fn wait(&mut self, duration: Duration) {
-        sleep(std::time::Duration::new(
-            duration.num_seconds() as u64,
-            (duration.num_nanoseconds().expect("sleep duration too large") - duration.num_seconds() * 1_000_000_000) as u32
-        ));
-    }
-}
-
-impl TimeSource for SteadyTimeSource {
-    fn now(&self) -> Duration {
-        SteadyTime::now() - self.offset
-    }
-}
-
 pub trait Abort: Send {
     fn abort(&self);
 }
@@ -114,47 +87,6 @@ pub trait AbortableWait {
     fn abort_handle(&self) -> Self::AbortHandle;
     fn abortable_wait(&mut self, duration: Duration) -> Result<(), WaitAbortedError>;
 }
-
-pub struct SteadyTimeSourceAbortHandle {
-    waiter_thread: Thread,
-    abort: Arc<Mutex<bool>>
-}
-
-impl Abort for SteadyTimeSourceAbortHandle {
-    fn abort(&self) {
-        {
-            let mut abort = self.abort.lock().unwrap();
-            *abort = true;
-        }
-
-        self.waiter_thread.unpark();
-    }
-}
-
-impl AbortableWait for SteadyTimeSource {
-    type AbortHandle = SteadyTimeSourceAbortHandle;
-
-    fn abort_handle(&self) -> Self::AbortHandle {
-        SteadyTimeSourceAbortHandle {
-            waiter_thread: thread::current(),
-            abort: self.abort.clone()
-        }
-    }
-
-    fn abortable_wait(&mut self, duration: Duration) -> Result<(), WaitAbortedError> {
-        //TODO: this can spuriously return
-        thread::park_timeout(std::time::Duration::new(
-            duration.num_seconds() as u64,
-            (duration.num_nanoseconds().expect("sleep duration too large") - duration.num_seconds() * 1_000_000_000) as u32
-        ));
-        if *self.abort.lock().unwrap() {
-            Err(WaitAbortedError)
-        } else {
-            Ok(())
-        }
-    }
-}
-
 
 type PointInTime = u64;
 
@@ -264,53 +196,6 @@ impl<Token> Error for WaitTimeoutError<Token> where Token: fmt::Debug + Any {
     }
 }
 
-pub enum AbortableWaitTimeoutError<Token> {
-    Empty,
-    Timeout,
-    Overrun(Vec<Token>),
-    Aborted
-}
-
-impl<Token> PartialEq for AbortableWaitTimeoutError<Token> where Token: PartialEq<Token> {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (&AbortableWaitTimeoutError::Empty, &AbortableWaitTimeoutError::Empty) => true,
-            (&AbortableWaitTimeoutError::Timeout, &AbortableWaitTimeoutError::Timeout) => true,
-            (&AbortableWaitTimeoutError::Overrun(ref tokens), &AbortableWaitTimeoutError::Overrun(ref other_tokens)) => tokens == other_tokens,
-            (&AbortableWaitTimeoutError::Aborted, &AbortableWaitTimeoutError::Aborted) => true,
-            _ => false
-        }
-    }
-}
-
-impl<Token> fmt::Debug for AbortableWaitTimeoutError<Token> where Token: fmt::Debug {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &AbortableWaitTimeoutError::Empty => write!(f, "AbortableWaitTimeoutError::Empty"),
-            &AbortableWaitTimeoutError::Timeout => write!(f, "AbortableWaitTimeoutError::Timeout"),
-            &AbortableWaitTimeoutError::Overrun(ref tokens) => write!(f, "AbortableWaitTimeoutError::Overrun({:?})", tokens),
-            &AbortableWaitTimeoutError::Aborted => write!(f, "AbortableWaitTimeoutError::Aborted")
-        }
-    }
-}
-
-impl<Token> fmt::Display for AbortableWaitTimeoutError<Token> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &AbortableWaitTimeoutError::Empty => write!(f, "scheduler is empty"),
-            &AbortableWaitTimeoutError::Timeout => write!(f, "timedout while waiting for tokens"),
-            &AbortableWaitTimeoutError::Overrun(ref tokens) => write!(f, "scheduler overrun {} tokens", tokens.len()),
-            &AbortableWaitTimeoutError::Aborted => write!(f, "wait operation was aborted from another thread")
-        }
-    }
-}
-
-impl<Token> Error for AbortableWaitTimeoutError<Token> where Token: fmt::Debug + Any {
-    fn description(&self) -> &str {
-        "problem while waiting for next schedule with timeout"
-    }
-}
-
 impl<Token> fmt::Debug for Schedule<Token> where Token: fmt::Debug {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -411,16 +296,6 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
         }
     }
 
-    //TODO: some way to integrate it with other async events in the program in a way that:
-    // * there is no need to loop over with short sleep - consume CPU
-    // * there is no latency - at the moment token is abailable it gets consumed by clint no mater
-    // if he waits for other events like channels or IO
-    // select? - make it selectable; would need to be somehow generic so can be used with other things like IO,
-    // channels etc. - only via FD and OS specific stuff (epoll) or with thread park (what select!
-    // macro does in very complicated way) - impl is out of scope for this unless it can be a
-    // client easily; also select! is unsable and will be so
-    // Note: if wait time_source wait does not progress time forward we will run out of stack!
-
     pub fn wait(&mut self) -> Result<Vec<Token>, WaitError<Token>> where TS: Wait {
         match self.next() {
             Some(schedule) => match schedule {
@@ -512,36 +387,6 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
 impl<Token, TS> FastForward for Scheduler<Token, TS> where TS: TimeSource + FastForward, Token: Clone {
     fn fast_forward(&mut self, duration: Duration) {
         self.time_source.fast_forward(duration);
-    }
-}
-
-impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource + Wait + AbortableWait, Token: Clone {
-    pub fn abort_handle(&self) -> <TS as AbortableWait>::AbortHandle {
-        self.time_source.abort_handle()
-    }
-
-    pub fn abortable_wait_timeout(&mut self, timeout: Duration) -> Result<Vec<Token>, AbortableWaitTimeoutError<Token>> {
-        match self.next() {
-            Some(schedule) => match schedule {
-                Schedule::NextIn(duration) => {
-                    if duration > timeout {
-                        if let Err(WaitAbortedError) = self.time_source.abortable_wait(timeout) {
-                            return Err(AbortableWaitTimeoutError::Aborted);
-                        };
-                        return Err(AbortableWaitTimeoutError::Timeout);
-                    }
-                    self.time_source.wait(duration);
-                    self.abortable_wait_timeout(Duration::zero())
-                },
-                Schedule::Overrun(overrun_tokens) => {
-                    Err(AbortableWaitTimeoutError::Overrun(overrun_tokens))
-                },
-                Schedule::Current(tokens) => {
-                    Ok(tokens)
-                }
-            },
-            None => Err(AbortableWaitTimeoutError::Empty)
-        }
     }
 }
 
@@ -933,49 +778,5 @@ mod test {
         assert_eq!(scheduler.wait(), Ok(vec![0]));
         assert_eq!(scheduler.wait(), Ok(vec![2, 3]));
         assert_eq!(scheduler.wait(), Ok(vec![5]));
-    }
-
-    #[test]
-    fn steady_time_source_abortable_wait_early_abort() {
-        use std::thread::spawn;
-
-        let mut sts = SteadyTimeSource::new();
-
-        let abort_handle = sts.abort_handle();
-        spawn(move || {
-            abort_handle.abort();
-        });
-
-        assert_eq!(sts.abortable_wait(Duration::seconds(2)), Err(WaitAbortedError));
-    }
-
-    #[test]
-    fn steady_time_source_abortable_wait_no_abort() {
-        let mut sts = SteadyTimeSource::new();
-
-        let _ = sts.abort_handle();
-
-        assert_eq!(sts.abortable_wait(Duration::seconds(1)), Ok(()));
-    }
-
-    #[test]
-    fn scheduler_abortable_wait_timeout_real_time() {
-        use std::thread::spawn;
-        let mut scheduler = Scheduler::new(Duration::milliseconds(100));
-
-        scheduler.after(Duration::milliseconds(100), 0);
-        scheduler.after(Duration::seconds(20), 1);
-        scheduler.after(Duration::seconds(40), 2);
-
-        let abort_handle = scheduler.abort_handle();
-
-        assert_eq!(scheduler.abortable_wait_timeout(Duration::seconds(2)), Ok(vec![0]));
-        assert_eq!(scheduler.abortable_wait_timeout(Duration::milliseconds(20)), Err(AbortableWaitTimeoutError::Timeout));
-
-        spawn(move || {
-            abort_handle.abort();
-        });
-
-        assert_eq!(scheduler.abortable_wait_timeout(Duration::seconds(2)), Err(AbortableWaitTimeoutError::Aborted));
     }
 }
