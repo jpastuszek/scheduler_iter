@@ -516,11 +516,11 @@ impl<Token, TS> FastForward for Scheduler<Token, TS> where TS: TimeSource + Fast
 }
 
 impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource + Wait + AbortableWait, Token: Clone {
-    fn abort_handle(&self) -> SteadyTimeSourceAbortHandle { //?
+    pub fn abort_handle(&self) -> <TS as AbortableWait>::AbortHandle {
         self.time_source.abort_handle()
     }
 
-    fn abortable_wait(&mut self, timeout: Duration) -> Result<Vec<Token>, AbortableWaitTimeoutError<Token>> {
+    pub fn abortable_wait_timeout(&mut self, timeout: Duration) -> Result<Vec<Token>, AbortableWaitTimeoutError<Token>> {
         match self.next() {
             Some(schedule) => match schedule {
                 Schedule::NextIn(duration) => {
@@ -531,7 +531,7 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource + Wait + AbortableWait
                         return Err(AbortableWaitTimeoutError::Timeout);
                     }
                     self.time_source.wait(duration);
-                    self.abortable_wait(Duration::zero())
+                    self.abortable_wait_timeout(Duration::zero())
                 },
                 Schedule::Overrun(overrun_tokens) => {
                     Err(AbortableWaitTimeoutError::Overrun(overrun_tokens))
@@ -956,5 +956,26 @@ mod test {
         let _ = sts.abort_handle();
 
         assert_eq!(sts.abortable_wait(Duration::seconds(1)), Ok(()));
+    }
+
+    #[test]
+    fn scheduler_abortable_wait_timeout_real_time() {
+        use std::thread::spawn;
+        let mut scheduler = Scheduler::new(Duration::milliseconds(100));
+
+        scheduler.after(Duration::milliseconds(100), 0);
+        scheduler.after(Duration::seconds(20), 1);
+        scheduler.after(Duration::seconds(40), 2);
+
+        let abort_handle = scheduler.abort_handle();
+
+        assert_eq!(scheduler.abortable_wait_timeout(Duration::seconds(2)), Ok(vec![0]));
+        assert_eq!(scheduler.abortable_wait_timeout(Duration::milliseconds(20)), Err(AbortableWaitTimeoutError::Timeout));
+
+        spawn(move || {
+            abort_handle.abort();
+        });
+
+        assert_eq!(scheduler.abortable_wait_timeout(Duration::seconds(2)), Err(AbortableWaitTimeoutError::Aborted));
     }
 }
