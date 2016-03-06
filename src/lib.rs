@@ -264,6 +264,53 @@ impl<Token> Error for WaitTimeoutError<Token> where Token: fmt::Debug + Any {
     }
 }
 
+pub enum AbortableWaitTimeoutError<Token> {
+    Empty,
+    Timeout,
+    Overrun(Vec<Token>),
+    Aborted
+}
+
+impl<Token> PartialEq for AbortableWaitTimeoutError<Token> where Token: PartialEq<Token> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (&AbortableWaitTimeoutError::Empty, &AbortableWaitTimeoutError::Empty) => true,
+            (&AbortableWaitTimeoutError::Timeout, &AbortableWaitTimeoutError::Timeout) => true,
+            (&AbortableWaitTimeoutError::Overrun(ref tokens), &AbortableWaitTimeoutError::Overrun(ref other_tokens)) => tokens == other_tokens,
+            (&AbortableWaitTimeoutError::Aborted, &AbortableWaitTimeoutError::Aborted) => true,
+            _ => false
+        }
+    }
+}
+
+impl<Token> fmt::Debug for AbortableWaitTimeoutError<Token> where Token: fmt::Debug {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            &AbortableWaitTimeoutError::Empty => write!(f, "AbortableWaitTimeoutError::Empty"),
+            &AbortableWaitTimeoutError::Timeout => write!(f, "AbortableWaitTimeoutError::Timeout"),
+            &AbortableWaitTimeoutError::Overrun(ref tokens) => write!(f, "AbortableWaitTimeoutError::Overrun({:?})", tokens),
+            &AbortableWaitTimeoutError::Aborted => write!(f, "AbortableWaitTimeoutError::Aborted")
+        }
+    }
+}
+
+impl<Token> fmt::Display for AbortableWaitTimeoutError<Token> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            &AbortableWaitTimeoutError::Empty => write!(f, "scheduler is empty"),
+            &AbortableWaitTimeoutError::Timeout => write!(f, "timedout while waiting for tokens"),
+            &AbortableWaitTimeoutError::Overrun(ref tokens) => write!(f, "scheduler overrun {} tokens", tokens.len()),
+            &AbortableWaitTimeoutError::Aborted => write!(f, "wait operation was aborted from another thread")
+        }
+    }
+}
+
+impl<Token> Error for AbortableWaitTimeoutError<Token> where Token: fmt::Debug + Any {
+    fn description(&self) -> &str {
+        "problem while waiting for next schedule with timeout"
+    }
+}
+
 impl<Token> fmt::Debug for Schedule<Token> where Token: fmt::Debug {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -465,6 +512,36 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
 impl<Token, TS> FastForward for Scheduler<Token, TS> where TS: TimeSource + FastForward, Token: Clone {
     fn fast_forward(&mut self, duration: Duration) {
         self.time_source.fast_forward(duration);
+    }
+}
+
+impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource + Wait + AbortableWait, Token: Clone {
+    fn abort_handle(&self) -> SteadyTimeSourceAbortHandle { //?
+        self.time_source.abort_handle()
+    }
+
+    fn abortable_wait(&mut self, timeout: Duration) -> Result<Vec<Token>, AbortableWaitTimeoutError<Token>> {
+        match self.next() {
+            Some(schedule) => match schedule {
+                Schedule::NextIn(duration) => {
+                    if duration > timeout {
+                        if let Err(WaitAbortedError) = self.time_source.abortable_wait(timeout) {
+                            return Err(AbortableWaitTimeoutError::Aborted);
+                        };
+                        return Err(AbortableWaitTimeoutError::Timeout);
+                    }
+                    self.time_source.wait(duration);
+                    self.abortable_wait(Duration::zero())
+                },
+                Schedule::Overrun(overrun_tokens) => {
+                    Err(AbortableWaitTimeoutError::Overrun(overrun_tokens))
+                },
+                Schedule::Current(tokens) => {
+                    Ok(tokens)
+                }
+            },
+            None => Err(AbortableWaitTimeoutError::Empty)
+        }
     }
 }
 
