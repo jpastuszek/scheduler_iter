@@ -3,8 +3,8 @@ use std::error::Error;
 use std::any::Any;
 use time::Duration;
 
-use super::{TimeSource, Wait};
-use super::{Scheduler, Schedule};
+use time_source::*;
+use scheduler::*;
 
 pub enum WaitError<Token> {
     Empty,
@@ -150,9 +150,10 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
 #[cfg(test)]
 mod test {
     use super::*;
-    use super::super::{FastForward, Scheduler};
-    use time::Duration;
+    use time_source::*;
+    use scheduler::*;
     use test_helpers::*;
+    use time::Duration;
 
     #[test]
     fn wait() {

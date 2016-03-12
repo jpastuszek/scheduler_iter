@@ -3,7 +3,7 @@ use std::thread::{self, Thread, sleep};
 use std::time::Duration as StdDuration;
 use time::{SteadyTime, Duration};
 
-use super::{TimeSource, Wait, Abort, AbortableWait, WaitAbortedError};
+use time_source::*;
 
 pub struct SteadyTimeSource {
     offset: SteadyTime,
@@ -76,10 +76,10 @@ impl AbortableWait for SteadyTimeSource {
 
 #[cfg(test)]
 mod test {
+    use super::*;
+    use time_source::*;
     use std::thread::spawn;
     use time::Duration;
-    use super::SteadyTimeSource;
-    use super::super::{Abort, AbortableWait, WaitAbortedError};
 
     #[test]
     fn abortable_wait_early_abort() {

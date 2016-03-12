@@ -1,5 +1,6 @@
-use super::*;
 use time::Duration;
+
+use time_source::*;
 
 pub struct MockTimeSource {
     current_time: Duration

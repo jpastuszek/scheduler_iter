@@ -3,8 +3,8 @@ use std::error::Error;
 use std::any::Any;
 use time::Duration;
 
-use super::{TimeSource, Wait, AbortableWait, WaitAbortedError};
-use super::{Scheduler, Schedule};
+use time_source::*;
+use scheduler::*;
 
 pub enum AbortableWaitTimeoutError<Token> {
     Empty,
@@ -85,8 +85,8 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource + Wait + AbortableWait
 #[cfg(test)]
 mod test {
     use super::*;
-    use super::super::{Abort, AbortableWait};
-    use super::super::Scheduler;
+    use time_source::*;
+    use scheduler::*;
     use time::Duration;
     use std::thread::spawn;
 
