@@ -91,7 +91,7 @@ mod test {
     use std::thread::spawn;
 
     #[test]
-    fn scheduler_abortable_wait_timeout_real_time() {
+    fn abortable_wait_timeout_real_time() {
         let mut scheduler = Scheduler::new(Duration::milliseconds(100));
 
         scheduler.after(Duration::milliseconds(100), 0);

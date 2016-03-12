@@ -43,7 +43,7 @@ mod test {
     use time::Duration;
 
     #[test]
-    fn task_next_schedule() {
+    fn next_schedule() {
         let now = Duration::seconds(0);
         let interval = Duration::seconds(1);
         let task = Task::new(interval, now, TaskBond::OneOff, 42);

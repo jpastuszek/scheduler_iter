@@ -232,7 +232,7 @@ mod test {
     use test_helpers::*;
 
     #[test]
-    fn scheduler_to_time_point() {
+    fn to_time_point() {
         let scheduler: Scheduler<(), _> = Scheduler::new(Duration::seconds(1));
         assert_eq!(scheduler.to_time_point(Duration::seconds(0)), 0);
         assert_eq!(scheduler.to_time_point(Duration::seconds(1)), 1);
@@ -246,7 +246,7 @@ mod test {
     }
 
     #[test]
-    fn scheduler_to_time_point_limits() {
+    fn to_time_point_limits() {
         let scheduler: Scheduler<(), _> = Scheduler::new(Duration::nanoseconds(1));
         assert_eq!(scheduler.to_time_point(Duration::seconds(0)), 0);
 
@@ -257,7 +257,7 @@ mod test {
     }
 
     #[test]
-    fn scheduler_to_duration() {
+    fn to_duration() {
         let scheduler: Scheduler<(), _> = Scheduler::new(Duration::seconds(1));
         assert_eq!(scheduler.to_duration(0), Duration::seconds(0));
         assert_eq!(scheduler.to_duration(1), Duration::seconds(1));
@@ -265,7 +265,7 @@ mod test {
     }
 
     #[test]
-    fn scheduler_to_duration_limits() {
+    fn to_duration_limits() {
         let scheduler: Scheduler<(), _> = Scheduler::new(Duration::nanoseconds(1));
         assert_eq!(scheduler.to_duration(0), Duration::nanoseconds(0));
         assert_eq!(scheduler.to_duration(1), Duration::nanoseconds(1));
@@ -277,14 +277,14 @@ mod test {
     }
 
     #[test]
-    fn scheduler_empty() {
+    fn empty() {
         let mut scheduler: Scheduler<(), _> = Scheduler::new(Duration::seconds(1));
         assert_eq!(scheduler.next(), None);
         assert_eq!(scheduler.next(), None);
     }
 
     #[test]
-    fn scheduler_after() {
+    fn after() {
         let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSource::new());
 
         scheduler.after(Duration::seconds(0), 0);
@@ -302,7 +302,7 @@ mod test {
     }
 
     #[test]
-    fn scheduler_after_opaque_token() {
+    fn after_opaque_token() {
         let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSource::new());
 
         scheduler.after(Duration::seconds(0), Zero);
@@ -316,7 +316,7 @@ mod test {
     }
 
     #[test]
-    fn scheduler_every() {
+    fn every() {
         let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSource::new());
 
         scheduler.every(Duration::seconds(1), 1);
@@ -337,7 +337,7 @@ mod test {
     }
 
     #[test]
-    fn scheduler_every_with_overrun() {
+    fn every_with_overrun() {
         let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSource::new());
 
         scheduler.every(Duration::seconds(1), 1);
@@ -347,7 +347,7 @@ mod test {
     }
 
     #[test]
-    fn scheduler_limits() {
+    fn limits() {
         let mut scheduler = Scheduler::with_time_source(Duration::nanoseconds(1), MockTimeSource::new());
 
         scheduler.after(Duration::nanoseconds(1), 1);
@@ -372,7 +372,7 @@ mod test {
     }
 
     #[test]
-    fn scheduler_next_in() {
+    fn next_in() {
         let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSource::new());
 
         scheduler.after(Duration::seconds(0), 0);
@@ -389,7 +389,7 @@ mod test {
     }
 
     #[test]
-    fn scheduler_cancel_whole_time_point() {
+    fn cancel_whole_time_point() {
         let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSource::new());
 
         scheduler.after(Duration::seconds(0), 0);
@@ -406,7 +406,7 @@ mod test {
     }
 
     #[test]
-    fn scheduler_cancel_single_token() {
+    fn cancel_single_token() {
         let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSource::new());
 
         scheduler.after(Duration::seconds(0), 0);

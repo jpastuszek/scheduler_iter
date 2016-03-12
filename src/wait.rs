@@ -155,7 +155,7 @@ mod test {
     use test_helpers::*;
 
     #[test]
-    fn scheduler_wait() {
+    fn wait() {
         let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSourceWait::new());
 
         scheduler.after(Duration::seconds(0), 0);
@@ -168,7 +168,7 @@ mod test {
     }
 
     #[test]
-    fn scheduler_wait_opeque_token() {
+    fn wait_opeque_token() {
         let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSourceWait::new());
 
         scheduler.after(Duration::seconds(0), Zero);
@@ -185,7 +185,7 @@ mod test {
     }
 
     #[test]
-    fn scheduler_wait_with_overrun() {
+    fn wait_with_overrun() {
         let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSourceWait::new());
 
         scheduler.after(Duration::seconds(0), 0);
@@ -198,7 +198,7 @@ mod test {
     }
 
     #[test]
-    fn scheduler_wait_timeout() {
+    fn wait_timeout() {
         let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSourceWait::new());
 
         scheduler.after(Duration::seconds(0), 0);
@@ -210,7 +210,7 @@ mod test {
     }
 
     #[test]
-    fn scheduler_wait_timeout_opeque_token() {
+    fn wait_timeout_opeque_token() {
         let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSourceWait::new());
 
         scheduler.after(Duration::seconds(0), Zero);
@@ -231,7 +231,7 @@ mod test {
     }
 
     #[test]
-    fn scheduler_wait_real_time() {
+    fn wait_real_time() {
         let mut scheduler = Scheduler::new(Duration::milliseconds(100));
 
         scheduler.after(Duration::milliseconds(0), 0);
@@ -244,7 +244,7 @@ mod test {
     }
 
     #[test]
-    fn scheduler_try() {
+    fn try() {
         let mut scheduler = Scheduler::with_time_source(Duration::nanoseconds(1), MockTimeSource::new());
 
         scheduler.after(Duration::seconds(0), 0);
@@ -265,7 +265,7 @@ mod test {
     }
 
     #[test]
-    fn scheduler_try_with_overrun() {
+    fn try_with_overrun() {
         let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSource::new());
 
         scheduler.after(Duration::seconds(0), 0);

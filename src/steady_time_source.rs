@@ -82,7 +82,7 @@ mod test {
     use super::super::{Abort, AbortableWait, WaitAbortedError};
 
     #[test]
-    fn steady_time_source_abortable_wait_early_abort() {
+    fn abortable_wait_early_abort() {
         let mut sts = SteadyTimeSource::new();
 
         let abort_handle = sts.abort_handle();
@@ -94,7 +94,7 @@ mod test {
     }
 
     #[test]
-    fn steady_time_source_abortable_wait_no_abort() {
+    fn abortable_wait_no_abort() {
         let mut sts = SteadyTimeSource::new();
 
         let _ = sts.abort_handle();
