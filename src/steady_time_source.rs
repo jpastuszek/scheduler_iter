@@ -74,6 +74,7 @@ impl AbortableWait for SteadyTimeSource {
     }
 }
 
+#[cfg(test)]
 mod test {
     use std::thread::spawn;
     use time::Duration;

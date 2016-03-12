@@ -1,53 +1,17 @@
 extern crate time;
 
 mod steady_time_source;
+mod mock_time_source;
+mod wait;
 mod abortable_wait;
 
 use std::collections::BTreeMap;
 use std::cmp::Ordering;
 use std::fmt;
 use std::error::Error;
-use std::any::Any;
 use std::cmp::PartialEq;
 use time::Duration;
 use steady_time_source::SteadyTimeSource;
-
-#[derive(Clone)]
-struct Task<Token> where Token: Clone {
-    interval: Duration,
-    run_offset: Duration,
-    token: Token,
-    bond: TaskBond
-}
-
-#[derive(Clone, Debug)]
-enum TaskBond {
-    OneOff,
-    Perpetual
-}
-
-impl<Token> Task<Token> where Token: Clone {
-    fn new(interval: Duration, run_offset: Duration, bond: TaskBond, token: Token) -> Task<Token> {
-        assert!(interval >= Duration::seconds(0), "negative interval would make schedule go back in time!");
-        Task {
-            interval: interval,
-            run_offset: run_offset,
-            bond: bond,
-            token: token
-        }
-    }
-
-    fn next(self) -> Task<Token> {
-        Task {
-            run_offset: self.run_offset + self.interval,
-            .. self
-        }
-    }
-
-    fn schedule(&self) -> Duration {
-        self.run_offset + self.interval
-    }
-}
 
 pub trait TimeSource {
     // Duration since this TimeSource was crated
@@ -88,6 +52,43 @@ pub trait AbortableWait {
     fn abortable_wait(&mut self, duration: Duration) -> Result<(), WaitAbortedError>;
 }
 
+#[derive(Clone)]
+struct Task<Token> where Token: Clone {
+    interval: Duration,
+    run_offset: Duration,
+    token: Token,
+    bond: TaskBond
+}
+
+#[derive(Clone, Debug)]
+enum TaskBond {
+    OneOff,
+    Perpetual
+}
+
+impl<Token> Task<Token> where Token: Clone {
+    fn new(interval: Duration, run_offset: Duration, bond: TaskBond, token: Token) -> Task<Token> {
+        assert!(interval >= Duration::seconds(0), "negative interval would make schedule go back in time!");
+        Task {
+            interval: interval,
+            run_offset: run_offset,
+            bond: bond,
+            token: token
+        }
+    }
+
+    fn next(self) -> Task<Token> {
+        Task {
+            run_offset: self.run_offset + self.interval,
+            .. self
+        }
+    }
+
+    fn schedule(&self) -> Duration {
+        self.run_offset + self.interval
+    }
+}
+
 type PointInTime = u64;
 
 enum SchedulerAction {
@@ -111,88 +112,6 @@ impl<Token> PartialEq for Schedule<Token> where Token: PartialEq<Token> {
             (&Schedule::Current(ref tokens), &Schedule::Current(ref other_tokens)) => tokens == other_tokens,
             _ => false
         }
-    }
-}
-
-pub enum WaitError<Token> {
-    Empty,
-    Overrun(Vec<Token>)
-}
-
-impl<Token> PartialEq for WaitError<Token> where Token: PartialEq<Token> {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (&WaitError::Empty, &WaitError::Empty) => true,
-            (&WaitError::Overrun(ref tokens), &WaitError::Overrun(ref other_tokens)) => tokens == other_tokens,
-            _ => false
-        }
-    }
-}
-
-impl<Token> fmt::Debug for WaitError<Token> where Token: fmt::Debug {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &WaitError::Empty => write!(f, "WaitError::Empty"),
-            &WaitError::Overrun(ref tokens) => write!(f, "WaitError::Overrun({:?})", tokens)
-        }
-    }
-}
-
-impl<Token> fmt::Display for WaitError<Token> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &WaitError::Empty => write!(f, "scheduler is empty"),
-            &WaitError::Overrun(ref tokens) => write!(f, "scheduler overrun {} tokens", tokens.len())
-        }
-    }
-}
-
-impl<Token> Error for WaitError<Token> where Token: fmt::Debug + Any {
-    fn description(&self) -> &str {
-        "problem while waiting for next schedule"
-    }
-}
-
-pub enum WaitTimeoutError<Token> {
-    Empty,
-    Timeout,
-    Overrun(Vec<Token>)
-}
-
-impl<Token> PartialEq for WaitTimeoutError<Token> where Token: PartialEq<Token> {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (&WaitTimeoutError::Empty, &WaitTimeoutError::Empty) => true,
-            (&WaitTimeoutError::Timeout, &WaitTimeoutError::Timeout) => true,
-            (&WaitTimeoutError::Overrun(ref tokens), &WaitTimeoutError::Overrun(ref other_tokens)) => tokens == other_tokens,
-            _ => false
-        }
-    }
-}
-
-impl<Token> fmt::Debug for WaitTimeoutError<Token> where Token: fmt::Debug {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &WaitTimeoutError::Empty => write!(f, "WaitError::Empty"),
-            &WaitTimeoutError::Timeout => write!(f, "WaitError::Timeout"),
-            &WaitTimeoutError::Overrun(ref tokens) => write!(f, "WaitError::Overrun({:?})", tokens)
-        }
-    }
-}
-
-impl<Token> fmt::Display for WaitTimeoutError<Token> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &WaitTimeoutError::Empty => write!(f, "scheduler is empty"),
-            &WaitTimeoutError::Timeout => write!(f, "timedout while waiting for tokens"),
-            &WaitTimeoutError::Overrun(ref tokens) => write!(f, "scheduler overrun {} tokens", tokens.len())
-        }
-    }
-}
-
-impl<Token> Error for WaitTimeoutError<Token> where Token: fmt::Debug + Any {
-    fn description(&self) -> &str {
-        "problem while waiting for next schedule with timeout"
     }
 }
 
@@ -303,63 +222,6 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
         }
     }
 
-    pub fn wait(&mut self) -> Result<Vec<Token>, WaitError<Token>> where TS: Wait {
-        match self.next() {
-            Some(schedule) => match schedule {
-                Schedule::NextIn(duration) => {
-                    self.time_source.wait(duration);
-                    self.wait()
-                },
-                Schedule::Overrun(overrun_tokens) => {
-                    Err(WaitError::Overrun(overrun_tokens))
-                },
-                Schedule::Current(tokens) => {
-                    Ok(tokens)
-                }
-            },
-            None => Err(WaitError::Empty)
-        }
-    }
-
-    pub fn wait_timeout(&mut self, timeout: Duration) -> Result<Vec<Token>, WaitTimeoutError<Token>> where TS: Wait {
-        match self.next() {
-            Some(schedule) => match schedule {
-                Schedule::NextIn(duration) => {
-                    if duration > timeout {
-                        self.time_source.wait(timeout);
-                        return Err(WaitTimeoutError::Timeout);
-                    }
-                    self.time_source.wait(duration);
-                    self.wait_timeout(Duration::zero())
-                },
-                Schedule::Overrun(overrun_tokens) => {
-                    Err(WaitTimeoutError::Overrun(overrun_tokens))
-                },
-                Schedule::Current(tokens) => {
-                    Ok(tokens)
-                }
-            },
-            None => Err(WaitTimeoutError::Empty)
-        }
-    }
-
-    pub fn try(&mut self) -> Option<Result<Vec<Token>, WaitError<Token>>> {
-        match self.next() {
-            Some(schedule) => match schedule {
-                Schedule::NextIn(_) => {
-                    None
-                },
-                Schedule::Overrun(overrun_tokens) => {
-                    Some(Err(WaitError::Overrun(overrun_tokens)))
-                },
-                Schedule::Current(tokens) => {
-                    Some(Ok(tokens))
-                }
-            },
-            None => Some(Err(WaitError::Empty))
-        }
-    }
-
     fn consume(&mut self, time_points: Vec<PointInTime>) -> Vec<Token> {
         let mut tasks: Vec<Task<Token>> = time_points.iter().flat_map(|time_point|
                 self.tasks.remove(&time_point).unwrap()
@@ -402,82 +264,7 @@ mod test {
     use super::*;
     use super::{Task, TaskBond};
     use time::Duration;
-
-    struct MockTimeSource {
-        current_time: Duration
-    }
-
-    impl MockTimeSource {
-        fn new() -> MockTimeSource {
-            MockTimeSource {
-                current_time: Duration::seconds(0)
-            }
-        }
-    }
-
-    impl FastForward for MockTimeSource {
-        fn fast_forward(&mut self, duration: Duration) {
-            self.current_time = self.current_time + duration;
-        }
-    }
-
-    impl TimeSource for MockTimeSource {
-        fn now(&self) -> Duration {
-            self.current_time
-        }
-    }
-
-    struct MockTimeSourceWait {
-        current_time: Duration
-    }
-
-    impl MockTimeSourceWait {
-        fn new() -> MockTimeSourceWait {
-            MockTimeSourceWait {
-                current_time: Duration::seconds(0)
-            }
-        }
-    }
-
-    impl FastForward for MockTimeSourceWait {
-        fn fast_forward(&mut self, duration: Duration) {
-            self.current_time = self.current_time + duration;
-        }
-    }
-
-    impl Wait for MockTimeSourceWait {
-        fn wait(&mut self, duration: Duration) {
-            self.current_time = self.current_time + duration;
-        }
-    }
-
-    impl TimeSource for MockTimeSourceWait {
-        fn now(&self) -> Duration {
-            self.current_time
-        }
-    }
-
-    // Used to test minimum requred traits on token type
-    #[derive(Clone)]
-    #[allow(dead_code)]
-    enum OpaqueToken {
-        Zero,
-        One,
-        Two,
-    }
-
-    impl OpaqueToken {
-        fn expect(&self, t: OpaqueToken) {
-            match (self, t) {
-                (&Zero, Zero) => (),
-                (&One, One) => (),
-                (&Two, Two) => (),
-                (_, _) => panic!("OpaqueToken mismatch")
-            }
-        }
-    }
-
-    use self::OpaqueToken::{Zero, One, Two};
+    use mock_time_source::test::*;
 
     #[test]
     fn task_next_schedule() {
@@ -647,95 +434,6 @@ mod test {
     }
 
     #[test]
-    fn scheduler_wait() {
-        let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSourceWait::new());
-
-        scheduler.after(Duration::seconds(0), 0);
-        scheduler.after(Duration::seconds(1), 1);
-        scheduler.after(Duration::seconds(2), 2);
-
-        assert_eq!(scheduler.wait(), Ok(vec![0]));
-        assert_eq!(scheduler.wait(), Ok(vec![1]));
-        assert_eq!(scheduler.wait(), Ok(vec![2]));
-    }
-
-    #[test]
-    fn scheduler_wait_opeque_token() {
-        let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSourceWait::new());
-
-        scheduler.after(Duration::seconds(0), Zero);
-        scheduler.after(Duration::seconds(1), One);
-        scheduler.after(Duration::seconds(2), Two);
-
-        match scheduler.wait() {
-            Ok(tokens) => {
-                assert_eq!(tokens.len(), 1);
-                tokens.first().unwrap().expect(Zero)
-            }
-            _ => panic!("expected Ok")
-        }
-    }
-
-    #[test]
-    fn scheduler_wait_with_overrun() {
-        let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSourceWait::new());
-
-        scheduler.after(Duration::seconds(0), 0);
-        scheduler.after(Duration::seconds(1), 1);
-        scheduler.after(Duration::seconds(2), 2);
-
-        scheduler.fast_forward(Duration::seconds(2));
-        assert_eq!(scheduler.wait(), Err(WaitError::Overrun(vec![0, 1])));
-        assert_eq!(scheduler.wait(), Ok(vec![2]));
-    }
-
-    #[test]
-    fn scheduler_wait_timeout() {
-        let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSourceWait::new());
-
-        scheduler.after(Duration::seconds(0), 0);
-        scheduler.after(Duration::seconds(1), 1);
-        scheduler.after(Duration::seconds(2), 2);
-
-        assert_eq!(scheduler.wait_timeout(Duration::seconds(2)), Ok(vec![0]));
-        assert_eq!(scheduler.wait_timeout(Duration::milliseconds(500)), Err(WaitTimeoutError::Timeout));
-    }
-
-    #[test]
-    fn scheduler_wait_timeout_opeque_token() {
-        let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSourceWait::new());
-
-        scheduler.after(Duration::seconds(0), Zero);
-        scheduler.after(Duration::seconds(1), One);
-        scheduler.after(Duration::seconds(2), Two);
-
-        match scheduler.wait_timeout(Duration::seconds(2)) {
-            Ok(tokens) => {
-                assert_eq!(tokens.len(), 1);
-                tokens.first().unwrap().expect(Zero)
-            }
-            _ => panic!("expected Ok")
-        }
-        match scheduler.wait_timeout(Duration::milliseconds(500)) {
-            Err(WaitTimeoutError::Timeout) => (),
-            _ => panic!("expected Err(WaitTimeoutError::Timeout)")
-        }
-    }
-
-    #[test]
-    fn scheduler_wait_real_time() {
-        let mut scheduler = Scheduler::new(Duration::milliseconds(100));
-
-        scheduler.after(Duration::milliseconds(0), 0);
-        scheduler.after(Duration::milliseconds(100), 1);
-        scheduler.after(Duration::milliseconds(200), 2);
-
-        assert_eq!(scheduler.wait(), Ok(vec![0]));
-        assert_eq!(scheduler.wait(), Ok(vec![1]));
-        assert_eq!(scheduler.wait(), Ok(vec![2]));
-    }
-
-    #[test]
     fn scheduler_cancel_whole_time_point() {
         let mut scheduler = Scheduler::new(Duration::milliseconds(100));
 
@@ -747,42 +445,9 @@ mod test {
         scheduler.cancel(&1);
         scheduler.cancel(&2);
 
+        //TODO: no wait use
         assert_eq!(scheduler.wait(), Ok(vec![0]));
         assert_eq!(scheduler.wait(), Ok(vec![4]));
-    }
-
-    #[test]
-    fn scheduler_try() {
-        let mut scheduler = Scheduler::with_time_source(Duration::nanoseconds(1), MockTimeSource::new());
-
-        scheduler.after(Duration::seconds(0), 0);
-        scheduler.after(Duration::seconds(1), 1);
-        scheduler.after(Duration::seconds(2), 2);
-
-        assert_eq!(scheduler.try(), Some(Ok(vec![0])));
-        assert_eq!(scheduler.try(), None);
-        assert_eq!(scheduler.try(), None);
-
-        scheduler.fast_forward(Duration::seconds(1));
-        assert_eq!(scheduler.try(), Some(Ok(vec![1])));
-        assert_eq!(scheduler.try(), None);
-
-        scheduler.fast_forward(Duration::seconds(1));
-        assert_eq!(scheduler.try(), Some(Ok(vec![2])));
-        assert_eq!(scheduler.try(), Some(Err(WaitError::Empty)));
-    }
-
-    #[test]
-    fn scheduler_try_with_overrun() {
-        let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSource::new());
-
-        scheduler.after(Duration::seconds(0), 0);
-        scheduler.after(Duration::seconds(1), 1);
-        scheduler.after(Duration::seconds(2), 2);
-
-        scheduler.fast_forward(Duration::seconds(2));
-        assert_eq!(scheduler.try(), Some(Err(WaitError::Overrun(vec![0, 1]))));
-        assert_eq!(scheduler.try(), Some(Ok(vec![2])));
     }
 
     #[test]
