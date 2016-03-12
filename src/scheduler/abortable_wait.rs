@@ -150,13 +150,15 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource + Wait + AbortableWait
 mod test {
     use super::*;
     use time_source::*;
+    use steady_time_source::*;
+    use test_helpers::*;
     use scheduler::*;
     use time::Duration;
     use std::thread::spawn;
 
     #[test]
-    fn abortable_wait_real_time() {
-        let mut scheduler = Scheduler::new(Duration::milliseconds(100));
+    fn abortable_wait_with_aborted_steady_time_source() {
+        let mut scheduler = Scheduler::with_time_source(Duration::milliseconds(100), SteadyTimeSource::new());
 
         scheduler.after(Duration::milliseconds(100), 0);
         scheduler.after(Duration::seconds(20), 1);
@@ -173,11 +175,32 @@ mod test {
         assert_eq!(scheduler.abortable_wait(), Err(AbortableWaitError::Aborted));
     }
 
-    //TODO: more tests
+    #[test]
+    fn abortable_wait_with_empty() {
+        let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSourceWait::new());
+        assert_eq!(scheduler.abortable_wait(), Err(AbortableWaitError::Empty));
+
+        scheduler.after(Duration::seconds(0), 0);
+        assert_eq!(scheduler.abortable_wait(), Ok(vec![0]));
+        assert_eq!(scheduler.abortable_wait(), Err(AbortableWaitError::Empty));
+    }
 
     #[test]
-    fn abortable_wait_timeout_real_time() {
-        let mut scheduler = Scheduler::new(Duration::milliseconds(100));
+    fn abortable_wait_with_with_overrun() {
+        let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSourceWait::new());
+
+        scheduler.after(Duration::seconds(0), 0);
+        scheduler.after(Duration::seconds(1), 1);
+        scheduler.after(Duration::seconds(2), 2);
+
+        scheduler.fast_forward(Duration::seconds(2));
+        assert_eq!(scheduler.abortable_wait(), Err(AbortableWaitError::Overrun(vec![0, 1])));
+        assert_eq!(scheduler.abortable_wait(), Ok(vec![2]));
+    }
+
+    #[test]
+    fn abortable_wait_timeout_with_aborted_steady_time_source() {
+        let mut scheduler = Scheduler::with_time_source(Duration::milliseconds(100), SteadyTimeSource::new());
 
         scheduler.after(Duration::milliseconds(100), 0);
         scheduler.after(Duration::seconds(20), 1);
@@ -186,12 +209,46 @@ mod test {
         let abort_handle = scheduler.abort_handle();
 
         assert_eq!(scheduler.abortable_wait_timeout(Duration::seconds(2)), Ok(vec![0]));
-        assert_eq!(scheduler.abortable_wait_timeout(Duration::milliseconds(20)), Err(AbortableWaitTimeoutError::Timeout));
 
         spawn(move || {
             abort_handle.abort();
         });
 
         assert_eq!(scheduler.abortable_wait_timeout(Duration::seconds(2)), Err(AbortableWaitTimeoutError::Aborted));
+    }
+
+    #[test]
+    fn abortable_wait_timeout_with_empty() {
+        let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSourceWait::new());
+        assert_eq!(scheduler.abortable_wait_timeout(Duration::seconds(4)), Err(AbortableWaitTimeoutError::Empty));
+
+        scheduler.after(Duration::seconds(0), 0);
+        assert_eq!(scheduler.abortable_wait_timeout(Duration::seconds(4)), Ok(vec![0]));
+        assert_eq!(scheduler.abortable_wait_timeout(Duration::seconds(4)), Err(AbortableWaitTimeoutError::Empty));
+    }
+
+    #[test]
+    fn abortable_wait_timeout_with_timeout() {
+        let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSourceWait::new());
+
+        scheduler.after(Duration::seconds(0), 0);
+        scheduler.after(Duration::seconds(1), 1);
+        scheduler.after(Duration::seconds(2), 2);
+
+        assert_eq!(scheduler.abortable_wait_timeout(Duration::seconds(2)), Ok(vec![0]));
+        assert_eq!(scheduler.abortable_wait_timeout(Duration::milliseconds(500)), Err(AbortableWaitTimeoutError::Timeout));
+    }
+
+    #[test]
+    fn abortable_wait_timeout_with_overrun() {
+        let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSourceWait::new());
+
+        scheduler.after(Duration::seconds(0), 0);
+        scheduler.after(Duration::seconds(1), 1);
+        scheduler.after(Duration::seconds(2), 2);
+
+        scheduler.fast_forward(Duration::seconds(2));
+        assert_eq!(scheduler.abortable_wait_timeout(Duration::seconds(4)), Err(AbortableWaitTimeoutError::Overrun(vec![0, 1])));
+        assert_eq!(scheduler.abortable_wait_timeout(Duration::seconds(4)), Ok(vec![2]));
     }
 }

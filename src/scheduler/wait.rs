@@ -151,6 +151,7 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
 mod test {
     use super::*;
     use time_source::*;
+    use steady_time_source::*;
     use scheduler::*;
     use test_helpers::*;
     use time::Duration;
@@ -186,6 +187,16 @@ mod test {
     }
 
     #[test]
+    fn wait_with_empty() {
+        let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSourceWait::new());
+        assert_eq!(scheduler.wait(), Err(WaitError::Empty));
+
+        scheduler.after(Duration::seconds(0), 0);
+        assert_eq!(scheduler.wait(), Ok(vec![0]));
+        assert_eq!(scheduler.wait(), Err(WaitError::Empty));
+    }
+
+    #[test]
     fn wait_with_overrun() {
         let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSourceWait::new());
 
@@ -199,7 +210,7 @@ mod test {
     }
 
     #[test]
-    fn wait_timeout() {
+    fn wait_timeout_with_timeout() {
         let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSourceWait::new());
 
         scheduler.after(Duration::seconds(0), 0);
@@ -211,7 +222,7 @@ mod test {
     }
 
     #[test]
-    fn wait_timeout_opeque_token() {
+    fn wait_timeout_with_timeout_opeque_token() {
         let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSourceWait::new());
 
         scheduler.after(Duration::seconds(0), Zero);
@@ -232,8 +243,8 @@ mod test {
     }
 
     #[test]
-    fn wait_real_time() {
-        let mut scheduler = Scheduler::new(Duration::milliseconds(100));
+    fn wait_steady_time_source() {
+        let mut scheduler = Scheduler::with_time_source(Duration::milliseconds(100), SteadyTimeSource::new());
 
         scheduler.after(Duration::milliseconds(0), 0);
         scheduler.after(Duration::milliseconds(100), 1);
@@ -262,6 +273,16 @@ mod test {
 
         scheduler.fast_forward(Duration::seconds(1));
         assert_eq!(scheduler.try(), Some(Ok(vec![2])));
+        assert_eq!(scheduler.try(), Some(Err(WaitError::Empty)));
+    }
+
+    #[test]
+    fn try_with_empty() {
+        let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSourceWait::new());
+        assert_eq!(scheduler.try(), Some(Err(WaitError::Empty)));
+
+        scheduler.after(Duration::seconds(0), 0);
+        assert_eq!(scheduler.try(), Some(Ok(vec![0])));
         assert_eq!(scheduler.try(), Some(Err(WaitError::Empty)));
     }
 
