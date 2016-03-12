@@ -1,5 +1,6 @@
 extern crate time;
 
+mod task;
 mod steady_time_source;
 mod wait;
 mod abortable_wait;
@@ -12,6 +13,7 @@ use std::fmt;
 use std::error::Error;
 use std::cmp::PartialEq;
 use time::Duration;
+use task::{Task, TaskBond};
 use steady_time_source::SteadyTimeSource;
 
 pub trait TimeSource {
@@ -51,43 +53,6 @@ pub trait AbortableWait {
 
     fn abort_handle(&self) -> Self::AbortHandle;
     fn abortable_wait(&mut self, duration: Duration) -> Result<(), WaitAbortedError>;
-}
-
-#[derive(Clone)]
-struct Task<Token> where Token: Clone {
-    interval: Duration,
-    run_offset: Duration,
-    token: Token,
-    bond: TaskBond
-}
-
-#[derive(Clone, Debug)]
-enum TaskBond {
-    OneOff,
-    Perpetual
-}
-
-impl<Token> Task<Token> where Token: Clone {
-    fn new(interval: Duration, run_offset: Duration, bond: TaskBond, token: Token) -> Task<Token> {
-        assert!(interval >= Duration::seconds(0), "negative interval would make schedule go back in time!");
-        Task {
-            interval: interval,
-            run_offset: run_offset,
-            bond: bond,
-            token: token
-        }
-    }
-
-    fn next(self) -> Task<Token> {
-        Task {
-            run_offset: self.run_offset + self.interval,
-            .. self
-        }
-    }
-
-    fn schedule(&self) -> Duration {
-        self.run_offset + self.interval
-    }
 }
 
 type PointInTime = u64;
@@ -263,19 +228,8 @@ impl<Token, TS> FastForward for Scheduler<Token, TS> where TS: TimeSource + Fast
 #[cfg(test)]
 mod test {
     use super::*;
-    use super::{Task, TaskBond};
     use time::Duration;
     use test_helpers::*;
-
-    #[test]
-    fn task_next_schedule() {
-        let now = Duration::seconds(0);
-        let interval = Duration::seconds(1);
-        let task = Task::new(interval, now, TaskBond::OneOff, 42);
-
-        assert_eq!(task.schedule(), now + interval);
-        assert_eq!(task.next().next().schedule(), now + interval * 3);
-    }
 
     #[test]
     fn scheduler_to_time_point() {
