@@ -28,7 +28,7 @@ enum TaskBond {
 
 impl<Token> Task<Token> where Token: Clone {
     fn new(interval: Duration, run_offset: Duration, bond: TaskBond, token: Token) -> Task<Token> {
-        assert!(interval >= Duration::seconds(0)); // negative interval would make schedule go back in time!
+        assert!(interval >= Duration::seconds(0), "negative interval would make schedule go back in time!");
         Task {
             interval: interval,
             run_offset: run_offset,
@@ -220,7 +220,7 @@ impl<Token> Scheduler<Token, SteadyTimeSource> where Token: Clone {
 
 impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
     pub fn with_time_source(time_point_interval: Duration, time_source: TS) -> Scheduler<Token, TS> {
-        assert!(time_point_interval > Duration::seconds(0));
+        assert!(time_point_interval > Duration::seconds(0), "time_point_interval must be positive Duration");
         Scheduler {
             time_point_interval: time_point_interval,
             tasks: BTreeMap::new(),
@@ -278,6 +278,13 @@ impl<Token, TS> Scheduler<Token, TS> where TS: TimeSource, Token: Clone {
             SchedulerAction::Yield(time_point) => {
                 Some(Schedule::Current(self.consume(vec![time_point])))
             }
+        }
+    }
+
+    pub fn next_in(&self) -> Duration {
+        match self.next_action() {
+            SchedulerAction::Wait(duration) => duration,
+            _ => Duration::zero()
         }
     }
 
@@ -620,6 +627,23 @@ mod test {
 
         scheduler.fast_forward(Duration::weeks(15250) / 2);
         assert_eq!(scheduler.next(), Some(Schedule::Current(vec![1])));
+    }
+
+    #[test]
+    fn scheduler_next_in() {
+        let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSource::new());
+
+        scheduler.after(Duration::seconds(0), 0);
+        assert_eq!(scheduler.next_in(), Duration::zero());
+        scheduler.next();
+
+        scheduler.fast_forward(Duration::seconds(1));
+        scheduler.after(Duration::seconds(1), 1);
+        assert_eq!(scheduler.next_in(), Duration::seconds(1));
+        scheduler.next();
+
+        scheduler.fast_forward(Duration::seconds(2));
+        assert_eq!(scheduler.next_in(), Duration::zero());
     }
 
     #[test]
