@@ -152,7 +152,7 @@ mod test {
     use super::*;
     use super::super::{FastForward, Scheduler};
     use time::Duration;
-    use mock_time_source::test::*;
+    use test_helpers::*;
 
     #[test]
     fn scheduler_wait() {

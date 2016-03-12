@@ -1,9 +1,10 @@
 extern crate time;
 
 mod steady_time_source;
-mod mock_time_source;
 mod wait;
 mod abortable_wait;
+#[cfg(test)]
+mod test_helpers;
 
 use std::collections::BTreeMap;
 use std::cmp::Ordering;
@@ -264,7 +265,7 @@ mod test {
     use super::*;
     use super::{Task, TaskBond};
     use time::Duration;
-    use mock_time_source::test::*;
+    use test_helpers::*;
 
     #[test]
     fn task_next_schedule() {
