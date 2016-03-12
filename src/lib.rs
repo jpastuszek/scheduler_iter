@@ -436,37 +436,39 @@ mod test {
 
     #[test]
     fn scheduler_cancel_whole_time_point() {
-        let mut scheduler = Scheduler::new(Duration::milliseconds(100));
+        let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSource::new());
 
-        scheduler.after(Duration::milliseconds(0), 0);
-        scheduler.after(Duration::milliseconds(100), 1);
-        scheduler.after(Duration::milliseconds(200), 2);
-        scheduler.after(Duration::milliseconds(300), 4);
+        scheduler.after(Duration::seconds(0), 0);
+        scheduler.after(Duration::seconds(1), 1);
+        scheduler.after(Duration::seconds(2), 2);
+        scheduler.after(Duration::seconds(3), 4);
 
         scheduler.cancel(&1);
         scheduler.cancel(&2);
 
-        //TODO: no wait use
-        assert_eq!(scheduler.wait(), Ok(vec![0]));
-        assert_eq!(scheduler.wait(), Ok(vec![4]));
+        assert_eq!(scheduler.next(), Some(Schedule::Current(vec![0])));
+        scheduler.fast_forward(Duration::seconds(3));
+        assert_eq!(scheduler.next(), Some(Schedule::Current(vec![4])));
     }
 
     #[test]
     fn scheduler_cancel_single_token() {
-        let mut scheduler = Scheduler::new(Duration::milliseconds(100));
+        let mut scheduler = Scheduler::with_time_source(Duration::seconds(1), MockTimeSource::new());
 
-        scheduler.after(Duration::milliseconds(0), 0);
-        scheduler.after(Duration::milliseconds(100), 1);
-        scheduler.after(Duration::milliseconds(100), 2);
-        scheduler.after(Duration::milliseconds(100), 3);
-        scheduler.after(Duration::milliseconds(200), 4);
-        scheduler.after(Duration::milliseconds(200), 5);
+        scheduler.after(Duration::seconds(0), 0);
+        scheduler.after(Duration::seconds(1), 1);
+        scheduler.after(Duration::seconds(1), 2);
+        scheduler.after(Duration::seconds(1), 3);
+        scheduler.after(Duration::seconds(2), 4);
+        scheduler.after(Duration::seconds(2), 5);
 
         scheduler.cancel(&1);
         scheduler.cancel(&4);
 
-        assert_eq!(scheduler.wait(), Ok(vec![0]));
-        assert_eq!(scheduler.wait(), Ok(vec![2, 3]));
-        assert_eq!(scheduler.wait(), Ok(vec![5]));
+        assert_eq!(scheduler.next(), Some(Schedule::Current(vec![0])));
+        scheduler.fast_forward(Duration::seconds(1));
+        assert_eq!(scheduler.next(), Some(Schedule::Current(vec![2, 3])));
+        scheduler.fast_forward(Duration::seconds(1));
+        assert_eq!(scheduler.next(), Some(Schedule::Current(vec![5])));
     }
 }
