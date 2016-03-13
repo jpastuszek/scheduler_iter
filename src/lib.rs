@@ -8,6 +8,7 @@ mod steady_time_source;
 mod test_helpers;
 
 pub use time::Duration;
+pub use time_source::*;
 pub use steady_time_source::*;
 pub use scheduler::*;
 
