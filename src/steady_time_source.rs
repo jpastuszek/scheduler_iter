@@ -19,18 +19,18 @@ impl SteadyTimeSource {
     }
 }
 
+impl TimeSource for SteadyTimeSource {
+    fn now(&self) -> Duration {
+        SteadyTime::now() - self.offset
+    }
+}
+
 impl Wait for SteadyTimeSource {
     fn wait(&mut self, duration: Duration) {
         sleep(StdDuration::new(
             duration.num_seconds() as u64,
             (duration.num_nanoseconds().expect("sleep duration too large") - duration.num_seconds() * 1_000_000_000) as u32
         ));
-    }
-}
-
-impl TimeSource for SteadyTimeSource {
-    fn now(&self) -> Duration {
-        SteadyTime::now() - self.offset
     }
 }
 
@@ -74,6 +74,13 @@ impl AbortableWait for SteadyTimeSource {
     }
 }
 
+impl FastForward for SteadyTimeSource {
+    fn fast_forward(&mut self, duration: Duration) {
+        assert!(duration > Duration::seconds(0), "fast_forward must be positive Duration");
+        self.offset = self.offset - duration;
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -100,5 +107,16 @@ mod test {
         let _ = sts.abort_handle();
 
         assert_eq!(sts.abortable_wait(Duration::seconds(1)), Ok(()));
+    }
+
+    #[test]
+    fn fast_forward() {
+        let mut sts = SteadyTimeSource::new();
+
+        let now = sts.now();
+        assert!(now + Duration::seconds(1) > sts.now());
+
+        sts.fast_forward(Duration::seconds(1));
+        assert!(now + Duration::seconds(1) <= sts.now());
     }
 }
