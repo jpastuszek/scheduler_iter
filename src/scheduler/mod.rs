@@ -1,6 +1,9 @@
 mod wait;
 mod abortable_wait;
 
+pub use scheduler::wait::*;
+pub use scheduler::abortable_wait::*;
+
 use std::collections::BTreeMap;
 use std::cmp::Ordering;
 use std::fmt;
